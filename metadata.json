@@ -1,0 +1,6 @@
+{
+  "name": "Snowhite",
+  "description": "Snowhite Laundry & Retail App with live PHP/MySQL API integration",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
