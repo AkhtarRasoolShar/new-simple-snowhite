@@ -308,6 +308,72 @@ class SnowhiteRepository {
         }
     }
 
+    suspend fun requestProfileUpdateOtp(userId: Long, channel: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val jsonBody = JSONObject().apply {
+                put("user_id", userId)
+                put("channel", channel)
+            }.toString()
+            val responseJson = executePost("${apiEndpoint}?action=request_profile_update_otp", jsonBody)
+            val rootObj = JSONObject(responseJson)
+            val status = rootObj.optString("status")
+            val message = rootObj.optString("message")
+            if (status == "success") {
+                Result.success(if (message.isNotEmpty()) message else "OTP sent via $channel")
+            } else {
+                Result.failure(Exception(if (message.isNotEmpty()) message else "Failed to request OTP"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun verifyAndUpdateProfile(
+        userId: Long,
+        otp: String,
+        newName: String,
+        newPhone: String,
+        newEmail: String,
+        newAddress: String,
+        newPassword: String?
+    ): Result<User> = withContext(Dispatchers.IO) {
+        try {
+            val jsonBody = JSONObject().apply {
+                put("user_id", userId)
+                put("customer_id", userId)
+                put("otp", otp.trim())
+                put("new_name", newName.trim())
+                put("new_phone", newPhone.trim())
+                put("new_email", newEmail.trim())
+                put("address", newAddress.trim())
+                put("new_address", newAddress.trim())
+                if (!newPassword.isNullOrBlank()) {
+                    put("new_password", newPassword)
+                }
+            }.toString()
+            val responseJson = executePost("${apiEndpoint}?action=verify_and_update_profile", jsonBody)
+            val rootObj = JSONObject(responseJson)
+            val status = rootObj.optString("status")
+            val message = rootObj.optString("message")
+            if (status == "success") {
+                val apiResponse = parseApiResponse<User>(responseJson)
+                val updatedUser = apiResponse?.data ?: User(
+                    id = userId,
+                    name = newName.trim(),
+                    phone = newPhone.trim(),
+                    email = newEmail.trim(),
+                    serviceZone = newAddress.trim(),
+                    address = newAddress.trim()
+                )
+                Result.success(updatedUser)
+            } else {
+                Result.failure(Exception(if (message.isNotEmpty()) message else "Invalid OTP or failed to update profile"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun createOrder(
         customerId: Long,
         pickupAddress: String,
@@ -466,6 +532,35 @@ class SnowhiteRepository {
                 Result.success(Unit)
             } else {
                 Result.failure(Exception(rootObj.optString("message", "Failed to update FCM token")))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitMembershipForm(
+        userId: Long,
+        name: String,
+        phone: String,
+        email: String,
+        address: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val jsonBody = JSONObject().apply {
+                put("user_id", userId)
+                put("name", name.trim())
+                put("phone", phone.trim())
+                put("email", email.trim())
+                put("address", address.trim())
+            }.toString()
+            val responseJson = executePost("${apiEndpoint}?action=submit_membership_form", jsonBody)
+            val rootObj = JSONObject(responseJson)
+            val status = rootObj.optString("status")
+            val message = rootObj.optString("message")
+            if (status == "success") {
+                Result.success(if (message.isNotEmpty()) message else "Application Submitted Successfully")
+            } else {
+                Result.failure(Exception(if (message.isNotEmpty()) message else "Failed to submit membership application"))
             }
         } catch (e: Exception) {
             Result.failure(e)

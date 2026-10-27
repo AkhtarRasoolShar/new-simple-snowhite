@@ -49,7 +49,7 @@ fun CheckoutScreen(
     var name by remember(user) { mutableStateOf(user.name ?: "") }
     var phone by remember(user) { mutableStateOf(user.phone ?: "") }
     var email by remember(user) { mutableStateOf(user.email ?: "") }
-    var address by remember { mutableStateOf("Plot 42-C, 26th Street, DHA Phase 6, Karachi") }
+    var address by remember(user) { mutableStateOf(user.address ?: user.serviceZone ?: "") }
     var notes by remember { mutableStateOf("") }
     var selectedPaymentMethod by remember { mutableIntStateOf(0) }
 

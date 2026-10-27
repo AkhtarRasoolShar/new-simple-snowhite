@@ -215,7 +215,10 @@ fun SnowhiteMainApp() {
                     selected = currentRoute == "home",
                     onClick = {
                         scope.launch { drawerState.close() }
-                        navController.navigate("home") { launchSingleTop = true }
+                        navController.navigate("home") {
+                            popUpTo("home") { inclusive = false }
+                            launchSingleTop = true
+                        }
                     }
                 )
 
@@ -305,7 +308,15 @@ fun SnowhiteMainApp() {
             topBar = {
                 TopAppBar(
                     title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable {
+                                navController.navigate("home") {
+                                    popUpTo("home") { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            }
+                        ) {
                             SnowhiteBrandIcon(logoUrl = settings.logoUrl, size = 32.dp)
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
@@ -403,14 +414,9 @@ fun SnowhiteMainApp() {
                         label = { Text("Home") },
                         selected = currentRoute == "home",
                         onClick = {
-                            if (currentRoute != "home") {
-                                navController.navigate("home") {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
+                            navController.navigate("home") {
+                                popUpTo("home") { inclusive = false }
+                                launchSingleTop = true
                             }
                         },
                         colors = NavigationBarItemDefaults.colors(
@@ -480,7 +486,13 @@ fun SnowhiteMainApp() {
                             viewModel = viewModel,
                             onBackClick = { navController.safePopBackStack() },
                             onNavigateToDepartments = { navController.navigate("departments") },
-                            onNavigateToRegister = { navController.navigate("register") }
+                            onNavigateToRegister = { navController.navigate("membership_registration") }
+                        )
+                    }
+                    composable("membership_registration") {
+                        MembershipRegistrationScreen(
+                            viewModel = viewModel,
+                            onNavigateBack = { navController.safePopBackStack() }
                         )
                     }
                     composable("register") {

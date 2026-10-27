@@ -306,7 +306,7 @@ fun HeroSectionCard(
                         elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
                     ) {
                         Text(
-                            text = "Explore Catalog",
+                            text = "Get Started",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White

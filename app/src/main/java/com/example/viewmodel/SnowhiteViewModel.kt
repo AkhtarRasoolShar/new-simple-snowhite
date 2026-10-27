@@ -364,6 +364,64 @@ class SnowhiteViewModel : ViewModel() {
         }
     }
 
+    fun requestProfileUpdateOtp(channel: String, onResult: (Boolean, String?) -> Unit) {
+        val user = _currentUser.value ?: run {
+            onResult(false, "User not logged in")
+            return
+        }
+        viewModelScope.launch {
+            _isLoading.value = true
+            val result = repository.requestProfileUpdateOtp(user.id, channel)
+            _isLoading.value = false
+            result.fold(
+                onSuccess = { msg -> onResult(true, msg) },
+                onFailure = { err -> onResult(false, err.message ?: "Failed to send OTP") }
+            )
+        }
+    }
+
+    fun verifyAndUpdateProfile(
+        otp: String,
+        newName: String,
+        newPhone: String,
+        newEmail: String,
+        newAddress: String,
+        newPassword: String?,
+        onResult: (Boolean, String?) -> Unit
+    ) {
+        val user = _currentUser.value ?: run {
+            onResult(false, "User not logged in")
+            return
+        }
+        viewModelScope.launch {
+            _isLoading.value = true
+            val result = repository.verifyAndUpdateProfile(
+                userId = user.id,
+                otp = otp,
+                newName = newName,
+                newPhone = newPhone,
+                newEmail = newEmail,
+                newAddress = newAddress,
+                newPassword = newPassword
+            )
+            _isLoading.value = false
+            result.fold(
+                onSuccess = { updated ->
+                    _currentUser.value = updated.copy(
+                        swCardNumber = updated.swCardNumber ?: user.swCardNumber,
+                        isSwMember = updated.isSwMember ?: user.isSwMember,
+                        freeOrdersBalance = updated.freeOrdersBalance ?: _freeOrdersBalance.value
+                    )
+                    _freeOrdersBalance.value = _currentUser.value?.freeOrdersBalance ?: 0
+                    onResult(true, "Profile updated successfully!")
+                },
+                onFailure = { err ->
+                    onResult(false, err.message ?: "Failed to verify and update profile")
+                }
+            )
+        }
+    }
+
     fun updateProfile(
         name: String,
         phone: String,
@@ -592,5 +650,35 @@ class SnowhiteViewModel : ViewModel() {
             body = testBody,
             type = "test"
         )
+    }
+
+    fun submitMembershipForm(
+        name: String,
+        phone: String,
+        email: String,
+        address: String,
+        onResult: (Boolean, String?) -> Unit
+    ) {
+        val user = _currentUser.value
+        val userId = user?.id ?: 0L
+        viewModelScope.launch {
+            _isLoading.value = true
+            val result = repository.submitMembershipForm(
+                userId = userId,
+                name = name,
+                phone = phone,
+                email = email,
+                address = address
+            )
+            _isLoading.value = false
+            result.fold(
+                onSuccess = { msg ->
+                    onResult(true, msg)
+                },
+                onFailure = { err ->
+                    onResult(false, err.message ?: "Failed to submit membership application")
+                }
+            )
+        }
     }
 }

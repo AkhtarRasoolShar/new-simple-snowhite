@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -16,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,6 +44,12 @@ fun ProfileScreen(
     var address by remember(currentUser) { mutableStateOf(currentUser?.address ?: currentUser?.serviceZone ?: "Karachi") }
     var newPassword by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+
+    // 2-Step OTP Verification States
+    var showOtpDialog by remember { mutableStateOf(false) }
+    var isOtpSent by remember { mutableStateOf(false) }
+    var otpCode by remember { mutableStateOf("") }
+    var selectedChannel by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -113,7 +121,7 @@ fun ProfileScreen(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Icon(
-                                        androidx.compose.material.icons.Icons.Default.Star,
+                                        Icons.Default.Star,
                                         contentDescription = null,
                                         tint = Color(0xFF16A34A),
                                         modifier = Modifier.size(14.dp)
@@ -292,20 +300,7 @@ fun ProfileScreen(
                                 Toast.makeText(context, "Please fill in all required fields", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
-                            isLoading = true
-                            viewModel.updateProfile(
-                                name = name,
-                                phone = phone,
-                                email = email,
-                                address = address,
-                                newPassword = if (newPassword.isBlank()) null else newPassword
-                            ) { success, msg ->
-                                isLoading = false
-                                Toast.makeText(context, msg ?: if (success) "Profile updated!" else "Update failed", Toast.LENGTH_LONG).show()
-                                if (success) {
-                                    newPassword = ""
-                                }
-                            }
+                            showOtpDialog = true
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -328,5 +323,159 @@ fun ProfileScreen(
                 }
             }
         }
+    }
+
+    if (showOtpDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showOtpDialog = false
+                isOtpSent = false
+                otpCode = ""
+                selectedChannel = ""
+            },
+            title = {
+                Text(
+                    text = if (!isOtpSent) "Security Verification" else "Enter OTP",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (!isOtpSent) {
+                        Text(
+                            text = "Where should we send your OTP to authorize these changes?",
+                            fontSize = 14.sp,
+                            color = Color(0xFF334155)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    selectedChannel = "whatsapp"
+                                    isLoading = true
+                                    viewModel.requestProfileUpdateOtp("whatsapp") { success, msg ->
+                                        isLoading = false
+                                        if (success) {
+                                            isOtpSent = true
+                                            Toast.makeText(context, msg ?: "OTP sent via WhatsApp", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, msg ?: "Failed to send OTP", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                enabled = !isLoading
+                            ) {
+                                Text("Via WhatsApp", fontSize = 12.sp, color = Color(0xFF0061E0), fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    selectedChannel = "email"
+                                    isLoading = true
+                                    viewModel.requestProfileUpdateOtp("email") { success, msg ->
+                                        isLoading = false
+                                        if (success) {
+                                            isOtpSent = true
+                                            Toast.makeText(context, msg ?: "OTP sent via Email", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, msg ?: "Failed to send OTP", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                enabled = !isLoading
+                            ) {
+                                Text("Via Email", fontSize = 12.sp, color = Color(0xFF0061E0), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (isLoading) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color(0xFF0061E0))
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Please enter the 6-digit code sent to your ${if (selectedChannel.isNotEmpty()) selectedChannel else "channel"}.",
+                            fontSize = 14.sp,
+                            color = Color(0xFF334155)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = otpCode,
+                            onValueChange = { if (it.length <= 6) otpCode = it },
+                            label = { Text("6-Digit OTP") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (isLoading) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color(0xFF0061E0))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (isOtpSent) {
+                    Button(
+                        onClick = {
+                            if (otpCode.isBlank()) {
+                                Toast.makeText(context, "Please enter the 6-digit OTP code", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            isLoading = true
+                            viewModel.verifyAndUpdateProfile(
+                                otp = otpCode,
+                                newName = name,
+                                newPhone = phone,
+                                newEmail = email,
+                                newAddress = address,
+                                newPassword = if (newPassword.isBlank()) null else newPassword
+                            ) { success, msg ->
+                                isLoading = false
+                                Toast.makeText(context, msg ?: if (success) "Profile updated successfully!" else "Update failed", Toast.LENGTH_LONG).show()
+                                if (success) {
+                                    showOtpDialog = false
+                                    isOtpSent = false
+                                    otpCode = ""
+                                    selectedChannel = ""
+                                    newPassword = ""
+                                }
+                            }
+                        },
+                        enabled = !isLoading,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061E0)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Verify & Save", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showOtpDialog = false
+                        isOtpSent = false
+                        otpCode = ""
+                        selectedChannel = ""
+                    }
+                ) {
+                    Text("Cancel", color = Color(0xFF64748B))
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
