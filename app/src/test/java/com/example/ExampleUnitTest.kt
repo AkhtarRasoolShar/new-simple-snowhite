@@ -190,7 +190,7 @@ class ExampleUnitTest {
 
     @Test
     fun retrofitClient_baseUrl_pointsToSnowRemoteServer() {
-        assertEquals("https://snow.akfasft.com/api/", com.example.network.RetrofitClient.BASE_URL)
+        assertEquals("https://snowhiteltd.com/api/routes.php", com.example.network.RetrofitClient.BASE_URL)
         assertNotNull(com.example.network.RetrofitClient.apiService)
     }
 

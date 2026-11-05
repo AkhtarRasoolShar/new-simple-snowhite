@@ -62,12 +62,23 @@ class SnowhiteViewModel : ViewModel() {
     private val _freeOrdersBalance = MutableStateFlow(0)
     val freeOrdersBalance: StateFlow<Int> = _freeOrdersBalance.asStateFlow()
 
+    private val _currentEnvironment = MutableStateFlow(com.example.config.AppConfig.currentEnvironment)
+    val currentEnvironment: StateFlow<com.example.config.AppEnvironment> = _currentEnvironment.asStateFlow()
+
     private val lastKnownOrderStatuses = mutableMapOf<Long, String>()
     private val lastSeenChatMessageId = mutableMapOf<Long, Long>()
     private var isWatcherStarted = false
     private var isInitialOrderLoad = true
 
     init {
+        loadInitialData()
+    }
+
+    fun switchEnvironment(context: android.content.Context, environment: com.example.config.AppEnvironment) {
+        com.example.config.AppConfig.setEnvironment(context, environment)
+        _currentEnvironment.value = environment
+        logout()
+        clearCart()
         loadInitialData()
     }
 

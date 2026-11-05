@@ -52,6 +52,7 @@ fun NavHostController.safePopBackStack() {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.example.config.AppConfig.init(applicationContext)
         enableEdgeToEdge()
         setContent {
             SnowhiteTheme {
