@@ -132,13 +132,6 @@ fun MembershipRegistrationScreen(
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
                                     text = "Rs. 3000/-",
-                                    fontSize = 13.sp,
-                                    color = Color(0xFF991B1B),
-                                    textDecoration = TextDecoration.LineThrough,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Rs. 5000/-",
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color(0xFF15803D)
