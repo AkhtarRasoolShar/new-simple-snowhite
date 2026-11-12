@@ -280,28 +280,6 @@ fun HeroSectionCard(
     banner: Banner? = null,
     onBrowseClick: () -> Unit
 ) {
-    val context = LocalContext.current
-    val resolvedBannerUrl = remember(banner?.imageUrl) {
-        banner?.imageUrl?.takeIf { it.isNotBlank() && it != "null" }?.let { AppConfig.resolveImageUrl(it) }
-    }
-
-    val initialMemBitmap = remember(resolvedBannerUrl) {
-        resolvedBannerUrl?.let { SnowhiteImageCache.getMemoryBitmap(it) }
-    }
-    var bannerBitmap by remember(resolvedBannerUrl) { mutableStateOf(initialMemBitmap) }
-
-    if (bannerBitmap == null && !resolvedBannerUrl.isNullOrBlank()) {
-        LaunchedEffect(resolvedBannerUrl) {
-            val loaded = withContext(Dispatchers.IO) {
-                SnowhiteImageCache.loadFromDisk(context, resolvedBannerUrl)
-                    ?: SnowhiteImageCache.downloadAndCache(context, resolvedBannerUrl)
-            }
-            if (loaded != null) {
-                bannerBitmap = loaded
-            }
-        }
-    }
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -320,21 +298,6 @@ fun HeroSectionCard(
                 )
                 .border(1.dp, Color(0xFFBAE6FD), RoundedCornerShape(24.dp))
         ) {
-            val bmp = bannerBitmap ?: initialMemBitmap
-            if (bmp != null) {
-                Image(
-                    bitmap = bmp.asImageBitmap(),
-                    contentDescription = banner?.title ?: "Snowhite Banner",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.White.copy(alpha = 0.72f))
-                )
-            }
-
             Box(
                 modifier = Modifier
                     .fillMaxSize()
