@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.aistudio.snowwhite.kptxld"
+        applicationId = "com.snowhiteltd.app"
         minSdk = 24
         targetSdk = 35
         versionCode = 3

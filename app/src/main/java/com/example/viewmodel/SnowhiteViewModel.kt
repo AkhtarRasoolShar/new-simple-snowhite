@@ -14,7 +14,10 @@ class SnowhiteViewModel : ViewModel() {
 
     private val repository = SnowhiteRepository()
 
-    private val _currentUser = MutableStateFlow<User?>(null)
+    private val initialSavedUser = repository.loadSavedUserSession()
+    private val initialSavedSwMember = repository.loadSavedSwMemberSession()
+
+    private val _currentUser = MutableStateFlow<User?>(initialSavedUser)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
     private val _settings = MutableStateFlow(repository.loadOfflineSettings() ?: GlobalSettings())
@@ -47,13 +50,19 @@ class SnowhiteViewModel : ViewModel() {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    private val _swCardNumber = MutableStateFlow<String?>(null)
+    private val _swCardNumber = MutableStateFlow<String?>(
+        initialSavedSwMember?.cardNumber ?: initialSavedUser?.swCardNumber
+    )
     val swCardNumber: StateFlow<String?> = _swCardNumber.asStateFlow()
 
-    private val _isSwMember = MutableStateFlow(false)
+    private val _isSwMember = MutableStateFlow(
+        initialSavedUser?.isSwMember == true ||
+                !initialSavedUser?.swCardNumber.isNullOrBlank() ||
+                initialSavedSwMember != null
+    )
     val isSwMember: StateFlow<Boolean> = _isSwMember.asStateFlow()
 
-    private val _swMember = MutableStateFlow<SwMember?>(null)
+    private val _swMember = MutableStateFlow<SwMember?>(initialSavedSwMember)
     val swMember: StateFlow<SwMember?> = _swMember.asStateFlow()
 
     private val _selectedProductForModal = MutableStateFlow<Product?>(null)
@@ -68,7 +77,7 @@ class SnowhiteViewModel : ViewModel() {
     private val _activeChatOrderId = MutableStateFlow<Long?>(null)
     val activeChatOrderId: StateFlow<Long?> = _activeChatOrderId.asStateFlow()
 
-    private val _freeOrdersBalance = MutableStateFlow(0)
+    private val _freeOrdersBalance = MutableStateFlow(initialSavedUser?.freeOrdersBalance ?: 0)
     val freeOrdersBalance: StateFlow<Int> = _freeOrdersBalance.asStateFlow()
 
     private val _currentEnvironment = MutableStateFlow(com.example.config.AppConfig.currentEnvironment)
@@ -77,11 +86,35 @@ class SnowhiteViewModel : ViewModel() {
     private val lastKnownOrderStatuses = mutableMapOf<Long, String>()
     private val lastSeenChatMessageId = mutableMapOf<Long, Long>()
     private var isWatcherStarted = false
+    private var isAutoSyncStarted = false
     private var isInitialOrderLoad = true
 
     init {
+        restoreUserSessionSynchronously()
         hydrateFromOfflineCacheSynchronously()
         loadInitialData()
+        startAutoSyncTicker()
+    }
+
+    fun restoreUserSessionSynchronously(context: android.content.Context? = com.example.config.AppConfig.appContext) {
+        val savedUser = repository.loadSavedUserSession(context)
+        val savedSw = repository.loadSavedSwMemberSession(context)
+        if (savedUser != null) {
+            _currentUser.value = savedUser
+            _freeOrdersBalance.value = savedUser.freeOrdersBalance ?: 0
+            if (savedUser.isSwMember == true || !savedUser.swCardNumber.isNullOrBlank() || savedSw != null) {
+                _isSwMember.value = true
+                _swCardNumber.value = savedSw?.cardNumber ?: savedUser.swCardNumber
+            }
+            if (savedSw != null) {
+                _swMember.value = savedSw
+            }
+            loadOrders()
+        } else if (savedSw != null) {
+            _swMember.value = savedSw
+            _isSwMember.value = true
+            _swCardNumber.value = savedSw.cardNumber
+        }
     }
 
     fun hydrateFromOfflineCacheSynchronously(context: android.content.Context? = com.example.config.AppConfig.appContext) {
@@ -110,26 +143,24 @@ class SnowhiteViewModel : ViewModel() {
         com.example.ui.components.SnowhiteImageCache.prefetchImages(context, urls)
     }
 
-    fun switchEnvironment(context: android.content.Context, environment: com.example.config.AppEnvironment) {
-        com.example.config.AppConfig.setEnvironment(context, environment)
-        _currentEnvironment.value = environment
-        logout()
-        clearCart()
-        loadInitialData()
+    private fun startAutoSyncTicker() {
+        if (isAutoSyncStarted) return
+        isAutoSyncStarted = true
+        viewModelScope.launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(15_000L)
+                silentSyncAllData()
+            }
+        }
     }
 
-    fun loadInitialData() {
+    fun silentSyncAllData(context: android.content.Context? = com.example.config.AppConfig.appContext) {
         viewModelScope.launch {
-            // Silent background sync: do not block UI if offline cache is already populated
-            val hasData = _products.value.isNotEmpty() && _categories.value.isNotEmpty()
-            if (!hasData) {
-                _isLoading.value = true
-            }
             launch {
                 repository.getSettings().onSuccess { freshSettings ->
                     _settings.value = freshSettings
                     com.example.ui.components.SnowhiteImageCache.prefetchImages(
-                        com.example.config.AppConfig.appContext,
+                        context,
                         listOf(freshSettings.logoUrl)
                     )
                 }
@@ -139,39 +170,74 @@ class SnowhiteViewModel : ViewModel() {
                     val sortedBanners = freshBanners.sortedBy { it.sort_order ?: 999 }
                     _banners.value = sortedBanners
                     com.example.ui.components.SnowhiteImageCache.prefetchImages(
-                        com.example.config.AppConfig.appContext,
+                        context,
                         sortedBanners.map { it.imageUrl }
                     )
                 }
             }
-            val catsJob = launch {
+            launch {
                 repository.getCategories().onSuccess { freshCategories ->
                     if (freshCategories.isNotEmpty()) {
                         val sortedCats = freshCategories.sortedBy { it.sort_order ?: 999 }
                         _categories.value = sortedCats
                         com.example.ui.components.SnowhiteImageCache.prefetchImages(
-                            com.example.config.AppConfig.appContext,
+                            context,
                             sortedCats.map { it.imageUrl }
                         )
                     }
                 }
             }
-            val prodsJob = launch {
+            launch {
                 repository.getProducts().onSuccess { freshProducts ->
                     if (freshProducts.isNotEmpty()) {
                         val sortedProds = freshProducts.sortedWith(compareBy({ it.sort_order ?: 999 }, { it.id }))
                         _products.value = sortedProds
+                        // Keep cart items' product prices/discounts synced in real-time
+                        val currentCart = _cartItems.value
+                        if (currentCart.isNotEmpty()) {
+                            val prodMap = sortedProds.associateBy { it.id }
+                            _cartItems.value = currentCart.map { item ->
+                                val updatedProd = prodMap[item.product.id]
+                                if (updatedProd != null) item.copy(product = updatedProd) else item
+                            }
+                        }
                         com.example.ui.components.SnowhiteImageCache.prefetchImages(
-                            com.example.config.AppConfig.appContext,
+                            context,
                             sortedProds.map { it.imageUrl }
                         )
                     }
                 }
             }
-            catsJob.join()
-            prodsJob.join()
-            _isLoading.value = false
+            val user = _currentUser.value
+            if (user != null) {
+                launch {
+                    repository.getOrders(user.id, user.phone ?: user.email).onSuccess { freshOrders ->
+                        _orders.value = freshOrders
+                    }
+                }
+            }
         }
+    }
+
+    fun switchEnvironment(context: android.content.Context, environment: com.example.config.AppEnvironment) {
+        com.example.config.AppConfig.setEnvironment(context, environment)
+        _currentEnvironment.value = environment
+        logout()
+        clearCart()
+        loadInitialData()
+    }
+
+    fun clearLocalCacheAndForceSync(context: android.content.Context, onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.clearOfflineCache(context)
+            com.example.ui.components.SnowhiteImageCache.clearCache(context)
+            silentSyncAllData(context)
+            onComplete()
+        }
+    }
+
+    fun loadInitialData() {
+        silentSyncAllData()
     }
 
     fun setSwMemberStatus(isMember: Boolean) {
@@ -197,12 +263,13 @@ class SnowhiteViewModel : ViewModel() {
                     val cardNo = member.cardNumber ?: trimmed
                     _swCardNumber.value = cardNo
                     _isSwMember.value = true
+                    repository.saveSwMemberSession(member)
 
                     val current = _currentUser.value
                     val newName = if (!current?.name.isNullOrBlank()) current?.name else member.memberName
                     val newPhone = if (!current?.phone.isNullOrBlank()) current?.phone else member.phone
-                    if (current == null) {
-                        _currentUser.value = User(
+                    val updatedUser = if (current == null) {
+                        User(
                             id = System.currentTimeMillis(),
                             name = member.memberName,
                             phone = member.phone,
@@ -211,13 +278,19 @@ class SnowhiteViewModel : ViewModel() {
                             swCardNumber = cardNo
                         )
                     } else {
-                        _currentUser.value = current.copy(
+                        current.copy(
                             name = newName,
                             phone = newPhone,
                             swCardNumber = cardNo,
                             isSwMember = true
                         )
                     }
+                    _currentUser.value = updatedUser
+                    repository.saveUserSession(
+                        user = updatedUser,
+                        isSwMemberOverride = true,
+                        swCardOverride = cardNo
+                    )
 
                     val welcomeName = member.memberName?.ifBlank { "Member" } ?: "Member"
                     onResult(true, member, "SW Gold Membership Verified! Welcome, $welcomeName")
@@ -371,6 +444,11 @@ class SnowhiteViewModel : ViewModel() {
                         _isSwMember.value = true
                         _swCardNumber.value = user.swCardNumber
                     }
+                    repository.saveUserSession(
+                        user = user,
+                        isSwMemberOverride = _isSwMember.value,
+                        swCardOverride = _swCardNumber.value
+                    )
                     loadOrders()
                     onResult(true, null)
                 },
@@ -390,6 +468,11 @@ class SnowhiteViewModel : ViewModel() {
                 onSuccess = { user ->
                     _currentUser.value = user
                     _freeOrdersBalance.value = user.freeOrdersBalance ?: 0
+                    repository.saveUserSession(
+                        user = user,
+                        isSwMemberOverride = _isSwMember.value,
+                        swCardOverride = _swCardNumber.value
+                    )
                     loadOrders()
                     onResult(true, null)
                 },
@@ -444,7 +527,15 @@ class SnowhiteViewModel : ViewModel() {
                     if (hasFreeOrder) {
                         val newBal = maxOf(0, _freeOrdersBalance.value - 1)
                         _freeOrdersBalance.value = newBal
-                        _currentUser.value = _currentUser.value?.copy(freeOrdersBalance = newBal)
+                        val updatedUser = _currentUser.value?.copy(freeOrdersBalance = newBal)
+                        _currentUser.value = updatedUser
+                        if (updatedUser != null) {
+                            repository.saveUserSession(
+                                user = updatedUser,
+                                isSwMemberOverride = _isSwMember.value,
+                                swCardOverride = _swCardNumber.value
+                            )
+                        }
                     }
                     clearCart()
                     loadOrders()
@@ -457,14 +548,68 @@ class SnowhiteViewModel : ViewModel() {
         }
     }
 
-    fun requestProfileUpdateOtp(channel: String, onResult: (Boolean, String?) -> Unit) {
+    fun uploadProfilePicture(
+        context: android.content.Context,
+        imageUri: android.net.Uri,
+        onResult: (Boolean, String?) -> Unit
+    ) {
+        val user = _currentUser.value ?: run {
+            onResult(false, "Please log in first")
+            return
+        }
+        viewModelScope.launch {
+            val uploadRes = repository.uploadProfileImage(context, user.id, imageUri)
+            uploadRes.fold(
+                onSuccess = { imageUrl ->
+                    val updatedUser = user.copy(profile_image = imageUrl)
+                    _currentUser.value = updatedUser
+                    repository.saveUserSession(
+                        user = updatedUser,
+                        isSwMemberOverride = _isSwMember.value,
+                        swCardOverride = _swCardNumber.value,
+                        context = context
+                    )
+                    // Also sync profile_image to server in background
+                    launch {
+                        repository.updateProfile(
+                            userId = user.id,
+                            name = updatedUser.name ?: "",
+                            phone = updatedUser.phone ?: "",
+                            email = updatedUser.email ?: "",
+                            address = updatedUser.address ?: updatedUser.serviceZone ?: "Karachi",
+                            newPassword = null,
+                            profileImage = imageUrl
+                        )
+                    }
+                    onResult(true, imageUrl)
+                },
+                onFailure = { err ->
+                    onResult(false, err.message ?: "Failed to upload profile picture")
+                }
+            )
+        }
+    }
+
+    fun requestProfileUpdateOtp(
+        channel: String,
+        newEmail: String = "",
+        newPhone: String = "",
+        onResult: (Boolean, String?) -> Unit
+    ) {
         val user = _currentUser.value ?: run {
             onResult(false, "User not logged in")
             return
         }
+        val effectiveEmail = newEmail.trim().ifEmpty { user.email?.trim().orEmpty() }
+        val effectivePhone = newPhone.trim().ifEmpty { user.phone?.trim().orEmpty() }
         viewModelScope.launch {
             _isLoading.value = true
-            val result = repository.requestProfileUpdateOtp(user.id, channel)
+            val result = repository.requestProfileUpdateOtp(
+                userId = user.id,
+                channel = channel,
+                newEmail = effectiveEmail,
+                newPhone = effectivePhone
+            )
             _isLoading.value = false
             result.fold(
                 onSuccess = { msg -> onResult(true, msg) },
@@ -480,32 +625,62 @@ class SnowhiteViewModel : ViewModel() {
         newEmail: String,
         newAddress: String,
         newPassword: String?,
+        profileImage: String? = null,
         onResult: (Boolean, String?) -> Unit
     ) {
         val user = _currentUser.value ?: run {
             onResult(false, "User not logged in")
             return
         }
+        val effectiveProfileImage = profileImage?.takeIf { it.isNotBlank() } ?: user.profile_image ?: ""
         viewModelScope.launch {
             _isLoading.value = true
-            val result = repository.verifyAndUpdateProfile(
+            val verifyRes = repository.verifyAndUpdateProfile(
                 userId = user.id,
                 otp = otp,
                 newName = newName,
                 newPhone = newPhone,
                 newEmail = newEmail,
                 newAddress = newAddress,
-                newPassword = newPassword
+                newPassword = newPassword,
+                profileImage = effectiveProfileImage
             )
+            // Also call updateProfile to ensure email, service_zone, phone, name, and profile_image are saved on all backend versions
+            val finalRes = if (verifyRes.isSuccess) {
+                repository.updateProfile(
+                    userId = user.id,
+                    name = newName,
+                    phone = newPhone,
+                    email = newEmail,
+                    address = newAddress,
+                    newPassword = newPassword,
+                    profileImage = effectiveProfileImage
+                )
+                verifyRes
+            } else {
+                verifyRes
+            }
             _isLoading.value = false
-            result.fold(
+            finalRes.fold(
                 onSuccess = { updated ->
-                    _currentUser.value = updated.copy(
+                    val mergedUser = updated.copy(
+                        name = newName.trim().ifBlank { updated.name ?: user.name },
+                        phone = newPhone.trim().ifBlank { updated.phone ?: user.phone },
+                        email = newEmail.trim().ifBlank { updated.email ?: user.email },
+                        serviceZone = newAddress.trim().ifBlank { updated.serviceZone ?: user.serviceZone ?: "Karachi" },
+                        address = newAddress.trim().ifBlank { updated.address ?: user.address ?: "Karachi" },
                         swCardNumber = updated.swCardNumber ?: user.swCardNumber,
                         isSwMember = updated.isSwMember ?: user.isSwMember,
-                        freeOrdersBalance = updated.freeOrdersBalance ?: _freeOrdersBalance.value
+                        freeOrdersBalance = updated.freeOrdersBalance ?: _freeOrdersBalance.value,
+                        profile_image = effectiveProfileImage.ifBlank { updated.profile_image ?: "" }
                     )
-                    _freeOrdersBalance.value = _currentUser.value?.freeOrdersBalance ?: 0
+                    _currentUser.value = mergedUser
+                    _freeOrdersBalance.value = mergedUser.freeOrdersBalance ?: 0
+                    repository.saveUserSession(
+                        user = mergedUser,
+                        isSwMemberOverride = _isSwMember.value,
+                        swCardOverride = _swCardNumber.value
+                    )
                     onResult(true, "Profile updated successfully!")
                 },
                 onFailure = { err ->
@@ -521,27 +696,50 @@ class SnowhiteViewModel : ViewModel() {
         email: String,
         address: String,
         newPassword: String?,
+        profileImage: String? = null,
         onResult: (Boolean, String?) -> Unit
     ) {
         val user = _currentUser.value ?: run {
             onResult(false, "User not logged in")
             return
         }
+        val effectiveProfileImage = profileImage?.takeIf { it.isNotBlank() } ?: user.profile_image ?: ""
         viewModelScope.launch {
             _isLoading.value = true
-            val result = repository.updateProfile(user.id, name, phone, email, address, newPassword)
+            val result = repository.updateProfile(
+                userId = user.id,
+                name = name,
+                phone = phone,
+                email = email,
+                address = address,
+                newPassword = newPassword,
+                profileImage = effectiveProfileImage
+            )
             _isLoading.value = false
             result.fold(
                 onSuccess = { updated ->
-                    _currentUser.value = updated.copy(
+                    val mergedUser = updated.copy(
+                        name = name.trim().ifBlank { updated.name ?: user.name },
+                        phone = phone.trim().ifBlank { updated.phone ?: user.phone },
+                        email = email.trim().ifBlank { updated.email ?: user.email },
+                        serviceZone = address.trim().ifBlank { updated.serviceZone ?: user.serviceZone ?: "Karachi" },
+                        address = address.trim().ifBlank { updated.address ?: user.address ?: "Karachi" },
                         swCardNumber = updated.swCardNumber ?: user.swCardNumber,
                         isSwMember = updated.isSwMember ?: user.isSwMember,
-                        freeOrdersBalance = updated.freeOrdersBalance ?: _freeOrdersBalance.value
+                        freeOrdersBalance = updated.freeOrdersBalance ?: _freeOrdersBalance.value,
+                        profile_image = effectiveProfileImage.ifBlank { updated.profile_image ?: "" }
                     )
-                    _freeOrdersBalance.value = _currentUser.value?.freeOrdersBalance ?: 0
+                    _currentUser.value = mergedUser
+                    _freeOrdersBalance.value = mergedUser.freeOrdersBalance ?: 0
+                    repository.saveUserSession(
+                        user = mergedUser,
+                        isSwMemberOverride = _isSwMember.value,
+                        swCardOverride = _swCardNumber.value
+                    )
                     onResult(true, "Profile updated successfully!")
                 },
                 onFailure = { err ->
+                    // Even if backend returns a non-fatal warning when only updating local fields, keep local state synced if needed or report error
                     onResult(false, err.message ?: "Failed to update profile")
                 }
             )
@@ -549,9 +747,11 @@ class SnowhiteViewModel : ViewModel() {
     }
 
     fun logout() {
+        repository.clearUserSession()
         _currentUser.value = null
         _isSwMember.value = false
         _swCardNumber.value = null
+        _swMember.value = null
         _freeOrdersBalance.value = 0
         _orders.value = emptyList()
     }
@@ -763,6 +963,35 @@ class SnowhiteViewModel : ViewModel() {
                 email = email,
                 address = address
             )
+            // Sync updated name, phone, email, and address back into local user session and profile
+            if (user != null) {
+                val syncedUser = user.copy(
+                    name = name.trim().ifBlank { user.name },
+                    phone = phone.trim().ifBlank { user.phone },
+                    email = email.trim().ifBlank { user.email },
+                    serviceZone = address.trim().ifBlank { user.serviceZone ?: "Karachi" },
+                    address = address.trim().ifBlank { user.address ?: "Karachi" }
+                )
+                _currentUser.value = syncedUser
+                repository.saveUserSession(
+                    user = syncedUser,
+                    isSwMemberOverride = _isSwMember.value,
+                    swCardOverride = _swCardNumber.value
+                )
+                if (userId > 0L) {
+                    launch {
+                        repository.updateProfile(
+                            userId = userId,
+                            name = syncedUser.name ?: "",
+                            phone = syncedUser.phone ?: "",
+                            email = syncedUser.email ?: "",
+                            address = syncedUser.address ?: "Karachi",
+                            newPassword = null,
+                            profileImage = syncedUser.profile_image
+                        )
+                    }
+                }
+            }
             _isLoading.value = false
             result.fold(
                 onSuccess = { msg ->

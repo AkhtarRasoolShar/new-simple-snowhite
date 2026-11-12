@@ -90,9 +90,10 @@ object SnowhiteImageCache {
 
     private fun getCacheDirs(context: Context): List<File> {
         val appCtx = context.applicationContext
+        val primaryPermanentDir = appCtx.filesDir.resolve("snowhite_image_cache").apply { if (!exists()) mkdirs() }
+        val legacyPermanentDir = appCtx.filesDir.resolve("snowhite_images").apply { if (!exists()) mkdirs() }
         val cacheDir = appCtx.cacheDir.resolve("snowhite_images").apply { if (!exists()) mkdirs() }
-        val permanentDir = appCtx.filesDir.resolve("snowhite_images").apply { if (!exists()) mkdirs() }
-        return listOf(cacheDir, permanentDir)
+        return listOf(primaryPermanentDir, legacyPermanentDir, cacheDir)
     }
 
     fun getMemoryBitmap(url: String?): Bitmap? {
@@ -198,6 +199,18 @@ object SnowhiteImageCache {
                         loader.enqueue(req)
                     }
                 }
+            }
+        }
+    }
+
+    fun clearCache(context: Context? = AppConfig.appContext) {
+        synchronized(memoryCache) {
+            memoryCache.evictAll()
+        }
+        val ctx = context?.applicationContext ?: AppConfig.appContext ?: return
+        runCatching {
+            getCacheDirs(ctx).forEach { dir ->
+                dir.listFiles()?.forEach { it.delete() }
             }
         }
     }

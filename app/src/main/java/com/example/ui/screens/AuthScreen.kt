@@ -18,7 +18,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.network.SnowhiteRepository
+import com.example.ui.components.CountryPhoneOption
 import com.example.ui.components.SnowhiteBrandIcon
+import com.example.ui.components.SnowhiteCountryPhoneField
+import com.example.ui.components.SnowhiteEmailField
+import com.example.ui.components.SnowhiteEmailValidator
+import com.example.ui.components.SnowhitePhoneValidator
 import com.example.viewmodel.SnowhiteViewModel
 import kotlinx.coroutines.launch
 
@@ -32,12 +37,20 @@ fun AuthScreen(
     val repository = remember { SnowhiteRepository() }
     val scope = rememberCoroutineScope()
     val settings by viewModel.settings.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
+
+    LaunchedEffect(currentUser) {
+        if (currentUser != null) {
+            onAuthSuccess()
+        }
+    }
 
     var isRegisterMode by remember { mutableStateOf(initialRegisterMode) }
     var isForgotMode by remember { mutableStateOf(false) }
     var forgotStep by remember { mutableIntStateOf(1) }
 
     var name by remember { mutableStateOf("") }
+    var selectedCountry by remember { mutableStateOf(CountryPhoneOption.PAKISTAN) }
     var phone by remember { mutableStateOf("") }
     var emailOrPhone by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
@@ -45,6 +58,7 @@ fun AuthScreen(
     var otp by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var showRegisterValidation by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -266,27 +280,29 @@ fun AuthScreen(
                         onValueChange = { name = it },
                         label = { Text("Full Name") },
                         modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
                         singleLine = true
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    OutlinedTextField(
-                        value = phone,
-                        onValueChange = { phone = it },
-                        label = { Text("Phone Number (Karachi)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                    SnowhiteCountryPhoneField(
+                        country = selectedCountry,
+                        onCountryChange = { selectedCountry = it },
+                        phoneDigits = phone,
+                        onPhoneDigitsChange = { phone = it },
+                        label = "Phone Number",
+                        showValidationError = showRegisterValidation
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it },
-                        label = { Text("Email Address") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                    SnowhiteEmailField(
+                        email = email,
+                        onEmailChange = { email = it },
+                        label = "Email Address",
+                        required = true,
+                        showValidationError = showRegisterValidation
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -297,6 +313,7 @@ fun AuthScreen(
                         label = { Text("Password") },
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
                         singleLine = true
                     )
 
@@ -304,11 +321,23 @@ fun AuthScreen(
 
                     Button(
                         onClick = {
-                            if (name.isBlank() || phone.isBlank() || email.isBlank() || password.isBlank()) {
-                                Toast.makeText(context, "Fill in all fields", Toast.LENGTH_SHORT).show()
+                            showRegisterValidation = true
+                            if (name.isBlank() || password.isBlank()) {
+                                Toast.makeText(context, "Please enter your full name and password", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
-                            viewModel.register(name, phone, email, password) { success, msg ->
+                            val phoneErr = SnowhitePhoneValidator.validatePhone(selectedCountry, phone)
+                            if (phoneErr != null) {
+                                Toast.makeText(context, phoneErr, Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val emailErr = SnowhiteEmailValidator.validateEmail(email, required = true)
+                            if (emailErr != null) {
+                                Toast.makeText(context, emailErr, Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val formattedPhone = SnowhitePhoneValidator.formatPhoneForApi(selectedCountry, phone)
+                            viewModel.register(name.trim(), formattedPhone, email.trim(), password) { success, msg ->
                                 if (success) {
                                     Toast.makeText(context, "Account created!", Toast.LENGTH_SHORT).show()
                                     onAuthSuccess()

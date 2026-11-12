@@ -11,6 +11,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -42,6 +43,9 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 
 fun NavHostController.safePopBackStack() {
     if (this.previousBackStackEntry != null) {
@@ -85,8 +89,27 @@ fun SnowhiteMainApp() {
     val unreadNotificationCount = remember(notificationsList) { notificationsList.count { !it.isRead } }
     var showNotificationDialog by remember { mutableStateOf(false) }
 
+    // Hidden 5-Tap Developer Mode Trigger State (2.5-second window)
+    var devTapCount by remember { mutableIntStateOf(0) }
+    var firstTapTimestamp by remember { mutableLongStateOf(0L) }
+    var showDeveloperDialog by remember { mutableStateOf(false) }
+
     val totalCartQty = remember(cartItems) { cartItems.sumOf { it.quantity } }
     val grandTotal = viewModel.calculateGrandTotal()
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.restoreUserSessionSynchronously(context)
+                viewModel.silentSyncAllData(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     LaunchedEffect(currentUser) {
         viewModel.startBackgroundWatcher(context)
@@ -150,46 +173,77 @@ fun SnowhiteMainApp() {
                         Spacer(modifier = Modifier.height(16.dp))
 
                         if (currentUser != null) {
-                            Column(
-                                modifier = Modifier.clickable {
-                                    scope.launch { drawerState.close() }
-                                    navController.navigate("profile") { launchSingleTop = true }
+                            val drawerInitials = remember(currentUser?.name) {
+                                val display = (currentUser?.name ?: "").trim()
+                                if (display.isBlank()) "SW"
+                                else {
+                                    val parts = display.split("\\s+".toRegex()).filter { it.isNotEmpty() }
+                                    when {
+                                        parts.size >= 2 -> "${parts[0].first().uppercaseChar()}${parts[1].first().uppercaseChar()}"
+                                        parts.size == 1 -> parts[0].take(2).uppercase()
+                                        else -> "SW"
+                                    }
                                 }
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        scope.launch { drawerState.close() }
+                                        navController.navigate("profile") { launchSingleTop = true }
+                                    }
                             ) {
-                                Text(
-                                    text = "Logged in as:",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFFBAE6FD)
+                                com.example.ui.components.SnowhiteUserAvatar(
+                                    profileImageUrl = currentUser?.profile_image,
+                                    initials = drawerInitials,
+                                    size = 46.dp,
+                                    fontSize = 16.sp
                                 )
-                                Text(
-                                    text = currentUser?.name ?: "Customer",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                                if (isSwMember) {
-                                    Surface(
-                                        color = Color(0xFFFEF3C7),
-                                        shape = RoundedCornerShape(6.dp),
-                                        modifier = Modifier.padding(top = 4.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Logged in as:",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFFBAE6FD)
+                                    )
+                                    Text(
+                                        text = currentUser?.name ?: "Customer",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    if (!currentUser?.email.isNullOrBlank()) {
+                                        Text(
+                                            text = currentUser?.email ?: "",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFFDBEAFE)
+                                        )
+                                    }
+                                    if (isSwMember) {
+                                        Surface(
+                                            color = Color(0xFFFEF3C7),
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.padding(top = 4.dp)
                                         ) {
-                                            Icon(
-                                                Icons.Default.Star,
-                                                contentDescription = null,
-                                                tint = Color(0xFFD97706),
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "SW GOLD MEMBER ACTIVE",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFFB45309)
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Star,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFD97706),
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = "SW GOLD MEMBER ACTIVE",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFFB45309)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -313,6 +367,18 @@ fun SnowhiteMainApp() {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.clickable {
+                                val now = System.currentTimeMillis()
+                                if (now - firstTapTimestamp > 3000L) {
+                                    devTapCount = 1
+                                    firstTapTimestamp = now
+                                } else {
+                                    devTapCount++
+                                    if (devTapCount >= 5) {
+                                        devTapCount = 0
+                                        firstTapTimestamp = 0L
+                                        showDeveloperDialog = true
+                                    }
+                                }
                                 navController.navigate("home") {
                                     popUpTo("home") { inclusive = false }
                                     launchSingleTop = true
@@ -416,6 +482,7 @@ fun SnowhiteMainApp() {
                         label = { Text("Home") },
                         selected = currentRoute == "home",
                         onClick = {
+                            viewModel.silentSyncAllData(context)
                             navController.navigate("home") {
                                 popUpTo("home") { inclusive = false }
                                 launchSingleTop = true
@@ -433,6 +500,7 @@ fun SnowhiteMainApp() {
                         label = { Text("Departments") },
                         selected = currentRoute == "departments",
                         onClick = {
+                            viewModel.silentSyncAllData(context)
                             if (currentRoute != "departments") {
                                 navController.navigate("departments") {
                                     launchSingleTop = true
@@ -451,6 +519,7 @@ fun SnowhiteMainApp() {
                         label = { Text("Tracking") },
                         selected = currentRoute == "orders",
                         onClick = {
+                            viewModel.silentSyncAllData(context)
                             if (currentRoute != "orders") {
                                 navController.navigate("orders") {
                                     launchSingleTop = true
@@ -637,12 +706,18 @@ fun SnowhiteMainApp() {
         }
     }
 
+    if (showDeveloperDialog) {
+        SecretDeveloperSettingsDialog(
+            viewModel = viewModel,
+            onDismiss = { showDeveloperDialog = false }
+        )
+    }
+
     if (showNotificationDialog) {
         NotificationCenterDialog(
             notifications = notificationsList,
             onDismiss = { showNotificationDialog = false },
             onMarkAllRead = { viewModel.markAllNotificationsAsRead() },
-            onTestSound = { viewModel.testNotificationSound(context) },
             onNotificationClick = { notification ->
                 viewModel.markNotificationAsRead(notification.id)
                 showNotificationDialog = false
@@ -666,7 +741,6 @@ fun NotificationCenterDialog(
     notifications: List<com.example.network.models.AppNotification>,
     onDismiss: () -> Unit,
     onMarkAllRead: () -> Unit,
-    onTestSound: () -> Unit,
     onNotificationClick: (com.example.network.models.AppNotification) -> Unit
 ) {
     AlertDialog(
@@ -677,66 +751,134 @@ fun NotificationCenterDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Notifications,
-                        contentDescription = null,
-                        tint = Color(0xFF0061E0),
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Notifications & Updates",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF0F172A)
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    // Soft tinted icon badge (#EFF6FF) with blue bell icon
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(Color(0xFFEFF6FF), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = null,
+                            tint = Color(0xFF0061E0),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Notifications & Updates",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Live order & rider activity",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF64748B)
+                        )
+                    }
                 }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+
+                // Subtle circular close (X) button on top-right
+                Surface(
+                    onClick = onDismiss,
+                    color = Color(0xFFF1F5F9),
+                    shape = CircleShape,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color(0xFF475569),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedButton(
-                        onClick = onMarkAllRead,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                // Action Bar: If notifications exist, show clean pill button "Mark all as read" aligned right
+                if (notifications.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Mark All as Read", fontSize = 11.sp, color = Color(0xFF0061E0))
-                    }
-
-                    Button(
-                        onClick = onTestSound,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061E0)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Icon(Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Test Sound", fontSize = 11.sp, color = Color.White)
+                        Surface(
+                            onClick = onMarkAllRead,
+                            color = Color(0xFFEFF6FF),
+                            shape = RoundedCornerShape(50),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBFDBFE))
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DoneAll,
+                                    contentDescription = null,
+                                    tint = Color(0xFF0061E0),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Mark all as read",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0061E0)
+                                )
+                            }
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
                 if (notifications.isEmpty()) {
-                    Box(
+                    // Empty State
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 32.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(vertical = 28.dp, horizontal = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .background(Color(0xFFF8FAFC), CircleShape)
+                                .border(1.dp, Color(0xFFE2E8F0), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsNone,
+                                contentDescription = null,
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "No notifications yet.\nOrder updates and rider messages will appear here in real-time.",
+                            text = "You're all caught up!",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Real-time laundry status updates and rider messages will appear here.",
                             fontSize = 13.sp,
                             color = Color(0xFF64748B),
+                            lineHeight = 18.sp,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
@@ -744,7 +886,7 @@ fun NotificationCenterDialog(
                     androidx.compose.foundation.lazy.LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 360.dp),
+                            .heightIn(max = 380.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(notifications.size) { index ->
@@ -753,7 +895,7 @@ fun NotificationCenterDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onNotificationClick(item) },
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = if (!item.isRead) Color(0xFFF0F7FF) else Color(0xFFF8FAFC)
                                 ),
@@ -762,20 +904,31 @@ fun NotificationCenterDialog(
                                     if (!item.isRead) Color(0xFFBAE6FD) else Color(0xFFE2E8F0)
                                 )
                             ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
+                                Column(modifier = Modifier.padding(14.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            if (!item.isRead) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(8.dp)
+                                                        .background(Color(0xFF0061E0), CircleShape)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                            }
                                             Surface(
                                                 color = when (item.type) {
                                                     "chat" -> Color(0xFFDCFCE7)
                                                     "test" -> Color(0xFFFEF3C7)
                                                     else -> Color(0xFFE0EFFE)
                                                 },
-                                                shape = RoundedCornerShape(4.dp)
+                                                shape = RoundedCornerShape(6.dp)
                                             ) {
                                                 Text(
                                                     text = item.type.uppercase(),
@@ -793,24 +946,28 @@ fun NotificationCenterDialog(
                                             Text(
                                                 text = item.title,
                                                 fontSize = 13.sp,
-                                                fontWeight = if (!item.isRead) FontWeight.Bold else FontWeight.SemiBold,
+                                                fontWeight = if (!item.isRead) FontWeight.ExtraBold else FontWeight.SemiBold,
                                                 color = Color(0xFF0F172A),
-                                                maxLines = 1
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                             )
                                         }
+                                        Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = item.timestamp,
                                             fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
                                             color = Color(0xFF94A3B8)
                                         )
                                     }
 
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
 
                                     Text(
                                         text = item.body,
                                         fontSize = 12.sp,
-                                        color = Color(0xFF334155)
+                                        color = Color(0xFF334155),
+                                        lineHeight = 17.sp
                                     )
                                 }
                             }
@@ -825,6 +982,6 @@ fun NotificationCenterDialog(
             }
         },
         containerColor = Color.White,
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(24.dp)
     )
 }

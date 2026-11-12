@@ -1,6 +1,9 @@
 package com.example.network
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import com.example.config.AppConfig
 import com.example.network.models.*
 import com.squareup.moshi.Moshi
@@ -10,12 +13,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -26,8 +31,10 @@ class SnowhiteRepository {
 
     companion object {
         private const val OFFLINE_CACHE_FILENAME = "snowhite_offline_cache.json"
+        private const val DATA_CACHE_PREFS_NAME = "snowhite_data_cache"
         private const val OFFLINE_PREFS_NAME = "snowhite_offline_store"
         private const val KEY_OFFLINE_JSON = "offline_cache_json"
+        private const val AUTH_PREFS_NAME = "snowhite_auth_prefs"
         private val cacheLock = Any()
     }
 
@@ -97,11 +104,147 @@ class SnowhiteRepository {
         return response.body?.string() ?: throw IOException("Empty response body")
     }
 
-    // ==================== OFFLINE JSON PERSISTENCE ====================
+    // ==================== PERSISTENT USER SESSION (snowhite_auth_prefs) ====================
+
+    fun saveUserSession(
+        user: User,
+        isSwMemberOverride: Boolean? = null,
+        swCardOverride: String? = null,
+        context: Context? = AppConfig.appContext
+    ) {
+        val ctx = context ?: return
+        runCatching {
+            val prefs = ctx.getSharedPreferences(AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+            val effectiveCard = swCardOverride ?: user.swCardNumber ?: prefs.getString("sw_card_number", null)
+            val effectiveIsSw = isSwMemberOverride ?: user.isSwMember ?: (!effectiveCard.isNullOrBlank())
+            val effectiveZone = user.serviceZone?.takeIf { it.isNotBlank() }
+                ?: user.address?.takeIf { it.isNotBlank() }
+                ?: prefs.getString("service_zone", "Karachi")
+                ?: "Karachi"
+            val effectiveAddress = user.address?.takeIf { it.isNotBlank() }
+                ?: user.serviceZone?.takeIf { it.isNotBlank() }
+                ?: prefs.getString("address", effectiveZone)
+                ?: effectiveZone
+            val effectiveEmail = user.email?.takeIf { it.isNotBlank() }
+                ?: prefs.getString("email", "")
+                ?: ""
+            val effectiveProfileImage = user.profile_image?.takeIf { it.isNotBlank() && it != "null" }
+                ?: prefs.getString("profile_image", "")
+                ?: ""
+            prefs.edit()
+                .putBoolean("isLoggedIn", true)
+                .putLong("id", user.id)
+                .putString("name", user.name ?: "")
+                .putString("phone", user.phone ?: "")
+                .putString("email", effectiveEmail)
+                .putString("service_zone", effectiveZone)
+                .putString("address", effectiveAddress)
+                .putString("sw_card_number", effectiveCard ?: "")
+                .putBoolean("is_sw_member", effectiveIsSw)
+                .putInt("free_orders_balance", user.freeOrdersBalance ?: 0)
+                .putString("profile_image", effectiveProfileImage)
+                .commit()
+        }
+    }
+
+    fun loadSavedUserSession(context: Context? = AppConfig.appContext): User? {
+        val ctx = context ?: return null
+        return try {
+            val prefs = ctx.getSharedPreferences(AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+            val isLoggedIn = prefs.getBoolean("isLoggedIn", false)
+            val id = prefs.getLong("id", 0L)
+            if (!isLoggedIn || id <= 0L) return null
+            val name = prefs.getString("name", "")?.takeIf { it.isNotBlank() }
+            val phone = prefs.getString("phone", "")?.takeIf { it.isNotBlank() }
+            val email = prefs.getString("email", "") ?: ""
+            val serviceZone = prefs.getString("service_zone", "Karachi")
+            val address = prefs.getString("address", serviceZone ?: "Karachi")
+            val swCardNumber = prefs.getString("sw_card_number", "")?.takeIf { it.isNotBlank() }
+            val isSwMember = prefs.getBoolean("is_sw_member", !swCardNumber.isNullOrBlank())
+            val freeOrdersBalance = prefs.getInt("free_orders_balance", 0)
+            val profileImage = prefs.getString("profile_image", "") ?: ""
+            User(
+                id = id,
+                name = name,
+                phone = phone,
+                email = email,
+                serviceZone = serviceZone,
+                address = address,
+                swCardNumber = swCardNumber,
+                isSwMember = isSwMember,
+                freeOrdersBalance = freeOrdersBalance,
+                profile_image = profileImage
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun saveSwMemberSession(member: SwMember, context: Context? = AppConfig.appContext) {
+        val ctx = context ?: return
+        runCatching {
+            val prefs = ctx.getSharedPreferences(AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("has_sw_member_obj", true)
+                .putString("sw_member_card", member.cardNumber ?: "")
+                .putString("sw_member_name", member.memberName ?: "")
+                .putString("sw_member_phone", member.phone ?: "")
+                .putString("sw_member_branch", member.branchCode ?: "")
+                .putString("sw_member_v1", member.voucher1 ?: "")
+                .putString("sw_member_v2", member.voucher2 ?: "")
+                .putString("sw_member_prem_pct", member.discountPremiumPercent?.toString() ?: "30")
+                .putString("sw_member_reg_pct", member.discountRegularPercent?.toString() ?: "20")
+                .putString("sw_member_expiry", member.expiryDate ?: "")
+                .putBoolean("is_sw_member", true)
+                .putString("sw_card_number", member.cardNumber ?: "")
+                .apply()
+        }
+    }
+
+    fun loadSavedSwMemberSession(context: Context? = AppConfig.appContext): SwMember? {
+        val ctx = context ?: return null
+        return try {
+            val prefs = ctx.getSharedPreferences(AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("has_sw_member_obj", false)) return null
+            SwMember(
+                cardNumber = prefs.getString("sw_member_card", null)?.takeIf { it.isNotBlank() },
+                memberName = prefs.getString("sw_member_name", null)?.takeIf { it.isNotBlank() },
+                phone = prefs.getString("sw_member_phone", null)?.takeIf { it.isNotBlank() },
+                branchCode = prefs.getString("sw_member_branch", null)?.takeIf { it.isNotBlank() },
+                voucher1 = prefs.getString("sw_member_v1", null)?.takeIf { it.isNotBlank() },
+                voucher2 = prefs.getString("sw_member_v2", null)?.takeIf { it.isNotBlank() },
+                discountPremiumPercent = prefs.getString("sw_member_prem_pct", "30"),
+                discountRegularPercent = prefs.getString("sw_member_reg_pct", "20"),
+                expiryDate = prefs.getString("sw_member_expiry", null)?.takeIf { it.isNotBlank() }
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun clearUserSession(context: Context? = AppConfig.appContext) {
+        val ctx = context ?: return
+        runCatching {
+            ctx.getSharedPreferences(AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .clear()
+                .commit()
+        }
+    }
+
+    // ==================== OFFLINE JSON PERSISTENCE (snowhite_data_cache) ====================
 
     private fun readOfflineRootJson(context: Context? = AppConfig.appContext): JSONObject {
         val ctx = context ?: return JSONObject()
         synchronized(cacheLock) {
+            try {
+                val dataPrefs = ctx.getSharedPreferences(DATA_CACHE_PREFS_NAME, Context.MODE_PRIVATE)
+                val savedData = dataPrefs.getString(KEY_OFFLINE_JSON, null)
+                if (!savedData.isNullOrBlank()) {
+                    return JSONObject(savedData)
+                }
+            } catch (_: Exception) {
+            }
             try {
                 val file = File(ctx.filesDir, OFFLINE_CACHE_FILENAME)
                 if (file.exists() && file.length() > 0L) {
@@ -129,6 +272,13 @@ class SnowhiteRepository {
         synchronized(cacheLock) {
             val jsonStr = root.toString()
             try {
+                ctx.getSharedPreferences(DATA_CACHE_PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_OFFLINE_JSON, jsonStr)
+                    .apply()
+            } catch (_: Exception) {
+            }
+            try {
                 File(ctx.filesDir, OFFLINE_CACHE_FILENAME).writeText(jsonStr, Charsets.UTF_8)
             } catch (_: Exception) {
             }
@@ -138,6 +288,27 @@ class SnowhiteRepository {
                     .putString(KEY_OFFLINE_JSON, jsonStr)
                     .apply()
             } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun clearOfflineCache(context: Context? = AppConfig.appContext) {
+        val ctx = context ?: return
+        synchronized(cacheLock) {
+            runCatching {
+                File(ctx.filesDir, OFFLINE_CACHE_FILENAME).delete()
+            }
+            runCatching {
+                ctx.getSharedPreferences(DATA_CACHE_PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .clear()
+                    .apply()
+            }
+            runCatching {
+                ctx.getSharedPreferences(OFFLINE_PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .clear()
+                    .apply()
             }
         }
     }
@@ -543,6 +714,7 @@ class SnowhiteRepository {
             val responseJson = executePost("${apiEndpoint}?action=login", jsonBody)
             val apiResponse = parseApiResponse<User>(responseJson)
             if (apiResponse?.status == "success" && apiResponse.data != null) {
+                saveUserSession(apiResponse.data)
                 Result.success(apiResponse.data)
             } else {
                 Result.failure(Exception(apiResponse?.message ?: "Invalid email/phone or password"))
@@ -563,6 +735,7 @@ class SnowhiteRepository {
             val responseJson = executePost("${apiEndpoint}?action=register", jsonBody)
             val apiResponse = parseApiResponse<User>(responseJson)
             if (apiResponse?.status == "success" && apiResponse.data != null) {
+                saveUserSession(apiResponse.data)
                 Result.success(apiResponse.data)
             } else {
                 Result.failure(Exception(apiResponse?.message ?: "Registration failed"))
@@ -658,25 +831,124 @@ class SnowhiteRepository {
         }
     }
 
+    suspend fun uploadProfileImage(
+        context: Context,
+        userId: Long,
+        imageUri: Uri
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val rawBytes = context.contentResolver.openInputStream(imageUri)?.use { it.readBytes() }
+                ?: return@withContext Result.failure(Exception("Unable to read selected image"))
+
+            val decodedBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+                ?: return@withContext Result.failure(Exception("Unsupported image format"))
+
+            // Scale down if larger than 800px to keep upload fast and crisp
+            val maxDim = 800
+            val scaledBitmap = if (decodedBitmap.width > maxDim || decodedBitmap.height > maxDim) {
+                val ratio = minOf(maxDim.toFloat() / decodedBitmap.width, maxDim.toFloat() / decodedBitmap.height)
+                val w = (decodedBitmap.width * ratio).toInt().coerceAtLeast(1)
+                val h = (decodedBitmap.height * ratio).toInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(decodedBitmap, w, h, true)
+            } else {
+                decodedBitmap
+            }
+
+            val baos = ByteArrayOutputStream()
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+            val jpegBytes = baos.toByteArray()
+
+            // Save a permanent local copy in snowhite_image_cache immediately
+            val cacheDir = context.applicationContext.filesDir.resolve("snowhite_image_cache").apply {
+                if (!exists()) mkdirs()
+            }
+            val localFile = File(cacheDir, "profile_${userId}_${System.currentTimeMillis()}.jpg")
+            localFile.writeBytes(jpegBytes)
+            com.example.ui.components.SnowhiteImageCache.putMemoryBitmap(localFile.absolutePath, scaledBitmap)
+
+            // Upload via Multipart POST to api/routes.php?action=upload_image
+            val mediaType = "image/jpeg".toMediaType()
+            val fileBody = jpegBytes.toRequestBody(mediaType)
+            val multipartBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("action", "upload_image")
+                .addFormDataPart("user_id", userId.toString())
+                .addFormDataPart("customer_id", userId.toString())
+                .addFormDataPart("image", localFile.name, fileBody)
+                .addFormDataPart("file", localFile.name, fileBody)
+                .addFormDataPart("profile_image", localFile.name, fileBody)
+                .build()
+
+            val uploadedUrl: String = try {
+                val request = Request.Builder()
+                    .url("${apiEndpoint}?action=upload_image")
+                    .post(multipartBody)
+                    .build()
+                val response = okHttpClient.newCall(request).execute()
+                val bodyStr = response.body?.string().orEmpty()
+                if (response.isSuccessful && bodyStr.isNotBlank()) {
+                    val jsonObj = JSONObject(bodyStr)
+                    val dataObj = jsonObj.optJSONObject("data")
+                    val rawServerUrl = jsonObj.optString("url").takeIf { it.isNotBlank() && it != "null" }
+                        ?: jsonObj.optString("image_url").takeIf { it.isNotBlank() && it != "null" }
+                        ?: jsonObj.optString("profile_image").takeIf { it.isNotBlank() && it != "null" }
+                        ?: dataObj?.optString("url")?.takeIf { it.isNotBlank() && it != "null" }
+                        ?: dataObj?.optString("image_url")?.takeIf { it.isNotBlank() && it != "null" }
+                        ?: dataObj?.optString("profile_image")?.takeIf { it.isNotBlank() && it != "null" }
+
+                    if (!rawServerUrl.isNullOrBlank()) {
+                        val resolved = AppConfig.resolveImageUrl(rawServerUrl)
+                        com.example.ui.components.SnowhiteImageCache.putMemoryBitmap(resolved, scaledBitmap)
+                        val hashed = com.example.ui.components.SnowhiteImageCache.hashUrl(resolved)
+                        runCatching { File(cacheDir, hashed).writeBytes(jpegBytes) }
+                        resolved
+                    } else {
+                        localFile.absolutePath
+                    }
+                } else {
+                    localFile.absolutePath
+                }
+            } catch (_: Exception) {
+                localFile.absolutePath
+            }
+
+            Result.success(uploadedUrl)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun updateProfile(
         userId: Long,
         name: String,
         phone: String,
         email: String,
         address: String,
-        newPassword: String? = null
+        newPassword: String? = null,
+        profileImage: String? = null
     ): Result<User> = withContext(Dispatchers.IO) {
         try {
+            val cleanName = name.trim()
+            val cleanPhone = phone.trim()
+            val cleanEmail = email.trim()
+            val cleanAddress = address.trim()
+            val cleanProfileImg = profileImage?.trim()
+
             val jsonBody = JSONObject().apply {
                 put("user_id", userId)
                 put("customer_id", userId)
-                put("name", name.trim())
-                put("phone", phone.trim())
-                put("email", email.trim())
-                put("address", address.trim())
-                put("service_zone", address.trim())
-                put("new_phone", phone.trim())
-                put("new_email", email.trim())
+                put("name", cleanName)
+                put("new_name", cleanName)
+                put("phone", cleanPhone)
+                put("new_phone", cleanPhone)
+                put("email", cleanEmail)
+                put("new_email", cleanEmail)
+                put("address", cleanAddress)
+                put("new_address", cleanAddress)
+                put("service_zone", cleanAddress)
+                if (!cleanProfileImg.isNullOrBlank()) {
+                    put("profile_image", cleanProfileImg)
+                }
                 if (!newPassword.isNullOrBlank()) {
                     put("new_password", newPassword)
                 }
@@ -687,14 +959,22 @@ class SnowhiteRepository {
             val message = rootObj.optString("message")
             if (status == "success") {
                 val apiResponse = parseApiResponse<User>(responseJson)
-                val updatedUser = apiResponse?.data ?: User(
-                    id = userId,
-                    name = name.trim(),
-                    phone = phone.trim(),
-                    email = email.trim(),
-                    serviceZone = address.trim(),
-                    address = address.trim()
+                val serverUser = apiResponse?.data
+                val updatedUser = User(
+                    id = serverUser?.id?.takeIf { it > 0 } ?: userId,
+                    name = cleanName.ifBlank { serverUser?.name ?: "" },
+                    phone = cleanPhone.ifBlank { serverUser?.phone ?: "" },
+                    email = cleanEmail.ifBlank { serverUser?.email ?: "" },
+                    serviceZone = cleanAddress.ifBlank { serverUser?.serviceZone ?: "Karachi" },
+                    address = cleanAddress.ifBlank { serverUser?.address ?: "Karachi" },
+                    swCardNumber = serverUser?.swCardNumber,
+                    isSwMember = serverUser?.isSwMember,
+                    freeOrdersBalance = serverUser?.freeOrdersBalance,
+                    profile_image = cleanProfileImg?.takeIf { it.isNotBlank() }
+                        ?: serverUser?.profile_image
+                        ?: ""
                 )
+                saveUserSession(updatedUser)
                 Result.success(updatedUser)
             } else {
                 Result.failure(Exception(if (message.isNotEmpty()) message else "Failed to update profile"))
@@ -704,11 +984,33 @@ class SnowhiteRepository {
         }
     }
 
-    suspend fun requestProfileUpdateOtp(userId: Long, channel: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun requestProfileUpdateOtp(
+        userId: Long,
+        channel: String,
+        newEmail: String = "",
+        newPhone: String = ""
+    ): Result<String> = withContext(Dispatchers.IO) {
         try {
+            val cleanEmail = newEmail.trim()
+            val cleanPhone = newPhone.trim()
             val jsonBody = JSONObject().apply {
                 put("user_id", userId)
+                put("customer_id", userId)
                 put("channel", channel)
+                if (cleanEmail.isNotEmpty()) {
+                    put("new_email", cleanEmail)
+                    put("email", cleanEmail)
+                    if (channel == "email") {
+                        put("identifier", cleanEmail)
+                    }
+                }
+                if (cleanPhone.isNotEmpty()) {
+                    put("new_phone", cleanPhone)
+                    put("phone", cleanPhone)
+                    if (channel == "whatsapp") {
+                        put("identifier", cleanPhone)
+                    }
+                }
             }.toString()
             val responseJson = executePost("${apiEndpoint}?action=request_profile_update_otp", jsonBody)
             val rootObj = JSONObject(responseJson)
@@ -717,6 +1019,14 @@ class SnowhiteRepository {
             if (status == "success") {
                 Result.success(if (message.isNotEmpty()) message else "OTP sent via $channel")
             } else {
+                // Fallback: if server says no registered email/phone for request_profile_update_otp, try forgot_password_request with the typed new_email/new_phone
+                val targetId = if (channel == "email") cleanEmail else cleanPhone
+                if (targetId.isNotEmpty()) {
+                    val fallbackRes = forgotPasswordRequest(targetId, channel)
+                    if (fallbackRes.isSuccess) {
+                        return@withContext fallbackRes
+                    }
+                }
                 Result.failure(Exception(if (message.isNotEmpty()) message else "Failed to request OTP"))
             }
         } catch (e: Exception) {
@@ -731,18 +1041,32 @@ class SnowhiteRepository {
         newPhone: String,
         newEmail: String,
         newAddress: String,
-        newPassword: String?
+        newPassword: String?,
+        profileImage: String? = null
     ): Result<User> = withContext(Dispatchers.IO) {
         try {
+            val cleanName = newName.trim()
+            val cleanPhone = newPhone.trim()
+            val cleanEmail = newEmail.trim()
+            val cleanAddress = newAddress.trim()
+            val cleanProfileImg = profileImage?.trim()
+
             val jsonBody = JSONObject().apply {
                 put("user_id", userId)
                 put("customer_id", userId)
                 put("otp", otp.trim())
-                put("new_name", newName.trim())
-                put("new_phone", newPhone.trim())
-                put("new_email", newEmail.trim())
-                put("address", newAddress.trim())
-                put("new_address", newAddress.trim())
+                put("name", cleanName)
+                put("new_name", cleanName)
+                put("phone", cleanPhone)
+                put("new_phone", cleanPhone)
+                put("email", cleanEmail)
+                put("new_email", cleanEmail)
+                put("address", cleanAddress)
+                put("new_address", cleanAddress)
+                put("service_zone", cleanAddress)
+                if (!cleanProfileImg.isNullOrBlank()) {
+                    put("profile_image", cleanProfileImg)
+                }
                 if (!newPassword.isNullOrBlank()) {
                     put("new_password", newPassword)
                 }
@@ -753,14 +1077,22 @@ class SnowhiteRepository {
             val message = rootObj.optString("message")
             if (status == "success") {
                 val apiResponse = parseApiResponse<User>(responseJson)
-                val updatedUser = apiResponse?.data ?: User(
-                    id = userId,
-                    name = newName.trim(),
-                    phone = newPhone.trim(),
-                    email = newEmail.trim(),
-                    serviceZone = newAddress.trim(),
-                    address = newAddress.trim()
+                val serverUser = apiResponse?.data
+                val updatedUser = User(
+                    id = serverUser?.id?.takeIf { it > 0 } ?: userId,
+                    name = cleanName.ifBlank { serverUser?.name ?: "" },
+                    phone = cleanPhone.ifBlank { serverUser?.phone ?: "" },
+                    email = cleanEmail.ifBlank { serverUser?.email ?: "" },
+                    serviceZone = cleanAddress.ifBlank { serverUser?.serviceZone ?: "Karachi" },
+                    address = cleanAddress.ifBlank { serverUser?.address ?: "Karachi" },
+                    swCardNumber = serverUser?.swCardNumber,
+                    isSwMember = serverUser?.isSwMember,
+                    freeOrdersBalance = serverUser?.freeOrdersBalance,
+                    profile_image = cleanProfileImg?.takeIf { it.isNotBlank() }
+                        ?: serverUser?.profile_image
+                        ?: ""
                 )
+                saveUserSession(updatedUser)
                 Result.success(updatedUser)
             } else {
                 Result.failure(Exception(if (message.isNotEmpty()) message else "Invalid OTP or failed to update profile"))
@@ -820,7 +1152,8 @@ class SnowhiteRepository {
             if (!phone.isNullOrEmpty()) {
                 urlBuilder?.addQueryParameter("phone", phone)
             }
-            val url = urlBuilder?.build()?.toString() ?: "${apiEndpoint}?action=get_customer_orders"
+            urlBuilder?.addQueryParameter("t", System.currentTimeMillis().toString())
+            val url = urlBuilder?.build()?.toString() ?: "${apiEndpoint}?action=get_customer_orders&t=${System.currentTimeMillis()}"
             val json = executeGet(url)
             val apiResponse = parseApiResponseList(json, Order::class.java)
             if (apiResponse?.status == "success") {
@@ -836,7 +1169,7 @@ class SnowhiteRepository {
     suspend fun getChatMessages(orderId: Any): Result<List<ChatMessage>> = withContext(Dispatchers.IO) {
         try {
             val cleanOrderId = orderId.toString().replace("#", "").replace("Order", "").trim().toLongOrNull() ?: 0L
-            val url = "${apiEndpoint}?action=get_chat_messages&order_id=$cleanOrderId"
+            val url = "${apiEndpoint}?action=get_chat_messages&order_id=$cleanOrderId&t=${System.currentTimeMillis()}"
             val json = executeGet(url)
             val apiResponse = parseApiResponseList(json, ChatMessage::class.java)
             if (apiResponse?.status == "success") {
@@ -942,12 +1275,19 @@ class SnowhiteRepository {
         address: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
+            val cleanName = name.trim()
+            val cleanPhone = phone.trim()
+            val cleanEmail = email.trim()
+            val cleanAddress = address.trim()
             val jsonBody = JSONObject().apply {
                 put("user_id", userId)
-                put("name", name.trim())
-                put("phone", phone.trim())
-                put("email", email.trim())
-                put("address", address.trim())
+                put("customer_id", userId)
+                put("name", cleanName)
+                put("phone", cleanPhone)
+                put("email", cleanEmail)
+                put("address", cleanAddress)
+                put("service_zone", cleanAddress)
+                put("official_email", "cs@snowhite.com.pk")
             }.toString()
             val responseJson = executePost("${apiEndpoint}?action=submit_membership_form", jsonBody)
             val rootObj = JSONObject(responseJson)

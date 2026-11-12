@@ -130,8 +130,12 @@ data class User(
     @Json(name = "address") val address: String? = null,
     @Json(name = "sw_card_number") val swCardNumber: String? = null,
     @Json(name = "is_sw_member") val isSwMember: Boolean? = false,
-    @Json(name = "free_orders_balance") val freeOrdersBalance: Int? = 0
-)
+    @Json(name = "free_orders_balance") val freeOrdersBalance: Int? = 0,
+    @Json(name = "profile_image") val profile_image: String? = ""
+) {
+    val effectiveProfileImage: String?
+        get() = profile_image?.takeIf { it.isNotBlank() && it != "null" }
+}
 
 @JsonClass(generateAdapter = true)
 data class OrderItem(

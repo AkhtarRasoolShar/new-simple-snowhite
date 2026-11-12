@@ -27,6 +27,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.SnowhiteBrandIcon
+import com.example.ui.components.SnowhiteCountryPhoneField
+import com.example.ui.components.SnowhiteEmailField
+import com.example.ui.components.SnowhiteEmailValidator
+import com.example.ui.components.SnowhitePhoneValidator
 import com.example.viewmodel.SnowhiteViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,12 +43,20 @@ fun MembershipRegistrationScreen(
     val settings by viewModel.settings.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
 
-    var name by remember(currentUser) { mutableStateOf(currentUser?.name ?: "") }
-    var phone by remember(currentUser) { mutableStateOf(currentUser?.phone ?: "") }
-    var email by remember(currentUser) { mutableStateOf(currentUser?.email ?: "") }
-    var address by remember(currentUser) { mutableStateOf(currentUser?.address ?: currentUser?.serviceZone ?: "") }
+    val initialCountryAndPhone = remember(currentUser?.phone) {
+        SnowhitePhoneValidator.detectCountryAndDigits(currentUser?.phone)
+    }
+
+    var name by remember(currentUser?.name) { mutableStateOf(currentUser?.name ?: "") }
+    var selectedCountry by remember(currentUser?.phone) { mutableStateOf(initialCountryAndPhone.first) }
+    var phoneDigits by remember(currentUser?.phone) { mutableStateOf(initialCountryAndPhone.second) }
+    var email by remember(currentUser?.email) { mutableStateOf(currentUser?.email ?: "") }
+    var address by remember(currentUser?.address, currentUser?.serviceZone) {
+        mutableStateOf(currentUser?.address ?: currentUser?.serviceZone ?: "")
+    }
 
     var isSubmitting by remember { mutableStateOf(false) }
+    var showValidationErrors by remember { mutableStateOf(false) }
     var showSuccessDialog by remember { mutableStateOf(false) }
     var dialogMessage by remember { mutableStateOf("") }
 
@@ -201,6 +213,7 @@ fun MembershipRegistrationScreen(
                             .fillMaxWidth()
                             .padding(bottom = 12.dp),
                         singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF0061E0),
@@ -208,50 +221,25 @@ fun MembershipRegistrationScreen(
                         )
                     )
 
-                    // Cell Phone No
-                    OutlinedTextField(
-                        value = phone,
-                        onValueChange = { phone = it },
-                        label = { Text("Cell Phone No") },
-                        placeholder = { Text("e.g. 03001234567") },
-                        leadingIcon = {
-                            Icon(Icons.Default.Phone, contentDescription = null, tint = Color(0xFF0061E0))
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Phone,
-                            imeAction = ImeAction.Next
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF0061E0),
-                            unfocusedBorderColor = Color(0xFFCBD5E1)
-                        )
+                    // Cell Phone No with Country Code Selector
+                    SnowhiteCountryPhoneField(
+                        country = selectedCountry,
+                        onCountryChange = { selectedCountry = it },
+                        phoneDigits = phoneDigits,
+                        onPhoneDigitsChange = { phoneDigits = it },
+                        label = "Cell Phone No",
+                        showValidationError = showValidationErrors,
+                        modifier = Modifier.padding(bottom = 12.dp)
                     )
 
-                    // Email Address
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it },
-                        label = { Text("Email Address") },
-                        placeholder = { Text("e.g. user@example.com") },
-                        leadingIcon = {
-                            Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF0061E0))
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Email,
-                            imeAction = ImeAction.Next
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF0061E0),
-                            unfocusedBorderColor = Color(0xFFCBD5E1)
-                        )
+                    // Email Address with Strict '@' Validation
+                    SnowhiteEmailField(
+                        email = email,
+                        onEmailChange = { email = it },
+                        label = "Email Address",
+                        required = true,
+                        showValidationError = showValidationErrors,
+                        modifier = Modifier.padding(bottom = 12.dp)
                     )
 
                     // Delivery Address
@@ -268,6 +256,7 @@ fun MembershipRegistrationScreen(
                             .padding(bottom = 20.dp),
                         minLines = 2,
                         maxLines = 4,
+                        shape = RoundedCornerShape(14.dp),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF0061E0),
@@ -306,26 +295,43 @@ fun MembershipRegistrationScreen(
                     // Submit Button
                     Button(
                         onClick = {
-                            if (name.isBlank() || phone.isBlank() || email.isBlank() || address.isBlank()) {
+                            showValidationErrors = true
+                            if (name.isBlank() || address.isBlank()) {
                                 Toast.makeText(
                                     context,
-                                    "Please fill in all fields to submit application.",
+                                    "Please enter your Full Name and Complete Delivery Address.",
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 return@Button
                             }
+                            val phoneError = SnowhitePhoneValidator.validatePhone(selectedCountry, phoneDigits)
+                            if (phoneError != null) {
+                                Toast.makeText(context, phoneError, Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val emailError = SnowhiteEmailValidator.validateEmail(email, required = true)
+                            if (emailError != null) {
+                                Toast.makeText(context, emailError, Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val formattedPhone = SnowhitePhoneValidator.formatPhoneForApi(selectedCountry, phoneDigits)
 
                             isSubmitting = true
                             viewModel.submitMembershipForm(
                                 name = name.trim(),
-                                phone = phone.trim(),
+                                phone = formattedPhone,
                                 email = email.trim(),
                                 address = address.trim()
                             ) { success, message ->
                                 isSubmitting = false
                                 if (success) {
-                                    dialogMessage = message
-                                        ?: "Application Submitted! Our representative will contact you shortly or your card will be approved automatically in your profile."
+                                    dialogMessage = message?.takeIf { it.isNotBlank() }
+                                        ?: "Application Submitted! Your request has been sent to Snowhite (cs@snowhite.com.pk) and Superadmin. Our representative will contact you shortly."
+                                    Toast.makeText(
+                                        context,
+                                        "Gold Membership Application submitted successfully!",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                     showSuccessDialog = true
                                 } else {
                                     Toast.makeText(
@@ -398,7 +404,9 @@ fun MembershipRegistrationScreen(
             },
             text = {
                 Text(
-                    text = "Application Submitted! Our representative will contact you shortly or your card will be approved automatically in your profile.",
+                    text = dialogMessage.ifBlank {
+                        "Application Submitted! Our representative will contact you shortly or your card will be approved automatically in your profile."
+                    },
                     fontSize = 14.sp,
                     color = Color(0xFF334155),
                     lineHeight = 20.sp
