@@ -302,7 +302,7 @@ fun ProductRowCard(
                             if (!isSwMember && swDiscountedPrice < product.numericPrice) {
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "★ SW Member Price: Rs. ${swDiscountedPrice.toInt()} PKR",
+                                    text = "★ SW Member Rate: Rs. ${swDiscountedPrice.toInt()} PKR",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFD97706)
@@ -494,7 +494,7 @@ fun ProductDetailModal(
                             if (!isSwMemberModal && swMemberModalPrice < product.numericPrice) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "★ SW Member Price: Rs. ${swMemberModalPrice.toInt()} PKR",
+                                    text = "★ SW Member Rate: Rs. ${swMemberModalPrice.toInt()} PKR",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFD97706)
