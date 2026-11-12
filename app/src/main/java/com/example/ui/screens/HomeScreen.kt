@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,11 +18,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.config.AppConfig
+import com.example.network.models.Banner
 import com.example.ui.components.SnowhiteBrandIcon
+import com.example.ui.components.SnowhiteImageCache
 import com.example.viewmodel.SnowhiteViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun HomeScreen(
@@ -32,8 +41,13 @@ fun HomeScreen(
 ) {
     val currentUser by viewModel.currentUser.collectAsState()
     val settings by viewModel.settings.collectAsState()
+    val banners by viewModel.banners.collectAsState()
     val isSwMember by viewModel.isSwMember.collectAsState()
     val freeOrdersBalance by viewModel.freeOrdersBalance.collectAsState()
+
+    val sortedBanners = remember(banners) {
+        banners.sortedBy { it.sort_order ?: 999 }
+    }
 
     Column(
         modifier = Modifier
@@ -45,6 +59,7 @@ fun HomeScreen(
         // 1. Top Banner / Hero Slider Card
         HeroSectionCard(
             logoUrl = settings.logoUrl,
+            banner = sortedBanners.firstOrNull(),
             onBrowseClick = onNavigateToDepartments
         )
 
@@ -163,8 +178,6 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-
-
         // 4. Quick Links for "My Orders & Tracking" and "SW Membership"
         Text(
             text = "Quick Actions",
@@ -264,8 +277,31 @@ fun HomeScreen(
 @Composable
 fun HeroSectionCard(
     logoUrl: String?,
+    banner: Banner? = null,
     onBrowseClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val resolvedBannerUrl = remember(banner?.imageUrl) {
+        banner?.imageUrl?.takeIf { it.isNotBlank() && it != "null" }?.let { AppConfig.resolveImageUrl(it) }
+    }
+
+    val initialMemBitmap = remember(resolvedBannerUrl) {
+        resolvedBannerUrl?.let { SnowhiteImageCache.getMemoryBitmap(it) }
+    }
+    var bannerBitmap by remember(resolvedBannerUrl) { mutableStateOf(initialMemBitmap) }
+
+    if (bannerBitmap == null && !resolvedBannerUrl.isNullOrBlank()) {
+        LaunchedEffect(resolvedBannerUrl) {
+            val loaded = withContext(Dispatchers.IO) {
+                SnowhiteImageCache.loadFromDisk(context, resolvedBannerUrl)
+                    ?: SnowhiteImageCache.downloadAndCache(context, resolvedBannerUrl)
+            }
+            if (loaded != null) {
+                bannerBitmap = loaded
+            }
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -284,6 +320,21 @@ fun HeroSectionCard(
                 )
                 .border(1.dp, Color(0xFFBAE6FD), RoundedCornerShape(24.dp))
         ) {
+            val bmp = bannerBitmap ?: initialMemBitmap
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = banner?.title ?: "Snowhite Banner",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.White.copy(alpha = 0.72f))
+                )
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()

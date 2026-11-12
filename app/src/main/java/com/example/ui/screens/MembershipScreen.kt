@@ -24,8 +24,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import com.example.ui.components.SnowhiteBrandIcon
-import com.example.ui.components.SnowhiteNetworkImage
 import com.example.viewmodel.SnowhiteViewModel
 
 import androidx.compose.foundation.rememberScrollState
@@ -83,10 +85,10 @@ fun MembershipScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Full-screen background image of Folded Clothes
-            SnowhiteNetworkImage(
-                url = "https://images.unsplash.com/photo-1582735689369-4fe89db7114c?w=800&q=80",
-                productName = "Folded Clothes Background",
+            // Full-screen background image of Folded Clothes rendered directly via painterResource
+            Image(
+                painter = painterResource(id = R.drawable.img_folded_clothes_bg),
+                contentDescription = "Folded Clothes Background",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )

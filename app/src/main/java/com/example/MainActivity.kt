@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.example.config.AppConfig.init(applicationContext)
+        com.example.ui.components.SnowhiteImageCache.getOrCreateCoilImageLoader(applicationContext)
         enableEdgeToEdge()
         setContent {
             SnowhiteTheme {

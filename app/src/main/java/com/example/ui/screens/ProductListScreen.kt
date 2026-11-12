@@ -60,7 +60,7 @@ fun ProductListScreen(
     }
 
     val sortedCategories = remember(categories) {
-        categories.sortedBy { getCategorySequenceScore(it.name) }
+        categories.sortedBy { it.sort_order ?: 999 }
     }
 
     val finalProducts = remember(departmentFiltered, selectedCategoryId, searchQuery) {
@@ -77,7 +77,7 @@ fun ProductListScreen(
                 (p.serviceType?.lowercase()?.contains(query) == true)
             }
         }
-        filtered.sortedBy { getProductSequenceScore(it) }
+        filtered.sortedWith(compareBy({ it.sort_order ?: 999 }, { it.id }))
     }
 
     Column(
@@ -575,90 +575,4 @@ fun ProductDetailModal(
             }
         }
     }
-}
-
-private fun getCategorySequenceScore(categoryName: String): Int {
-    val cat = categoryName.lowercase()
-    if (cat.contains("laundry")) return 1
-    if (cat.contains("gent") || cat.contains("dry clean")) return 2
-    if (cat.contains("lady") || cat.contains("ladies")) return 3
-    if (cat.contains("house") || cat.contains("linen")) return 4
-    if (cat.contains("powder") || cat.contains("retail")) return 5
-    return 99
-}
-
-private fun getProductSequenceScore(product: Product): Int {
-    val name = product.name.trim().lowercase()
-    val category = (product.categoryName ?: "").lowercase()
-    val service = (product.serviceType ?: "").lowercase()
-
-    val isLaundry = service.contains("laundry") || category.contains("laundry") || name.contains("laundry")
-    val isDryClean = service.contains("dry clean") || category.contains("dry clean") || name.contains("dry clean")
-
-    // 1. Gents Laundry (Start items: Qameez, Shalwar, Shalwar Suit, Shirt, Kurti Cotton, T-Shirt, Underwear, Vest)
-    if (isLaundry || (category.contains("gent") && isLaundry)) {
-        if (name == "qameez" || name.startsWith("qameez (laundry)")) return 101
-        if (name == "shalwar" || name.startsWith("shalwar (laundry)")) return 102
-        if (name.contains("shalwar suit (cotton") || (name.contains("shalwar suit") && isLaundry)) return 103
-        if (name == "shirt" || (name.contains("shirt") && !name.contains("silk") && isLaundry)) return 104
-        if (name.contains("kurti")) return 105
-        if (name.contains("t-shirt") || name.contains("golf shirt")) return 106
-        if (name.contains("under wear") || name.contains("underwear")) return 107
-        if (name == "vest") return 108
-        if (isLaundry) return 150
-    }
-
-    // 2. Gents Dry Cleaning (Pants/Jeans, Coat, Shirt Silk, Suit 2pcs, Suit 3pcs, Qameez Silk, Shalwar Silk, Shalwar Suit Silk, Cardigan, Sweater, Pajama, Safari Suit, Sherwani, Vest Coat, Tie)
-    if (category.contains("gent") || isDryClean) {
-        if (name.contains("pants") || (name.contains("jeans") && !category.contains("lady") && !category.contains("ladies"))) return 201
-        if (name == "coat") return 202
-        if (name.contains("shirt silk") || name.contains("silk shirt")) return 203
-        if (name.contains("suit 2pcs") || name == "suit 2 pcs") return 204
-        if (name.contains("suit 3pcs") || name.contains("suit pcs") || name.contains("suit 4pcs") || name.contains("suit")) return 205
-        if (name.contains("qameez (silk") || name.contains("qameez silk") || name.contains("bosky") || name.contains("khadi")) return 206
-        if (name.contains("shalwar (silk") || name.contains("shalwar silk")) return 207
-        if (name.contains("shalwar suit (silk") || name.contains("shalwar suit silk")) return 208
-        if (name.contains("cardigan")) return 209
-        if (name.contains("sweater / pull over") || name.contains("sweater") || name.contains("pull over")) return 210
-        if (name.contains("sweater sleeveless")) return 211
-        if (name.contains("pajama") || name.contains("tracks")) return 212
-        if (name.contains("safari suit")) return 213
-        if (name.contains("sherwani")) return 214
-        if (name.contains("vest coat")) return 215
-        if (name == "tie") return 216
-        if (category.contains("gent")) return 250
-    }
-
-    // 3. Ladies Wear (Qameez Plain/Cotton, Shalwar Plain/Cotton, Dupatta, Qameez Poly/Silk, Shalwar Poly/Silk, Dupatta Poly/Silk, Jeans/Trousers, Shawl)
-    if (category.contains("lady") || category.contains("ladies")) {
-        if (name.contains("qameez (plain") || name.contains("qameez cotton") || (name.contains("qameez") && !name.contains("silk"))) return 301
-        if (name.contains("shalwar (plain") || name.contains("shalwar cotton") || (name.contains("shalwar") && !name.contains("silk"))) return 302
-        if (name.contains("dupatta (plain") || name.contains("dupatta cotton") || (name.contains("dupatta") && !name.contains("silk"))) return 303
-        if (name.contains("qameez (poly") || name.contains("qameez silk")) return 304
-        if (name.contains("shalwar (poly") || name.contains("shalwar silk")) return 305
-        if (name.contains("dupatta (poly") || name.contains("dupatta silk")) return 306
-        if (name.contains("jeans") || name.contains("trousers")) return 307
-        if (name.contains("shawl")) return 308
-        return 350
-    }
-
-    // 4. House Hold / Linen (Blankets, Carpets, Curtains, Bed Sheets, Pillow Covers)
-    if (category.contains("house") || category.contains("linen") || category.contains("carpet") || category.contains("curtain") || category.contains("blanket")) {
-        if (name.contains("blanket")) return 401
-        if (name.contains("carpet woolen") || name.contains("carpet synthetic")) return 402
-        if (name.contains("carpet chinese") || name.contains("carpet persian")) return 403
-        if (name.contains("exclusive carpet") || name.contains("carpet")) return 404
-        if (name.contains("curtain")) return 405
-        if (name.contains("bed sheet double") || name.contains("bedsheet double") || name.contains("bed sheet")) return 406
-        if (name.contains("bed sheet single") || name.contains("bedsheet single")) return 407
-        if (name.contains("pillow")) return 408
-        return 450
-    }
-
-    // 5. Washing Powder & Products / Retail
-    if (category.contains("powder") || category.contains("retail") || category.contains("product")) {
-        return 500
-    }
-
-    return 999
 }

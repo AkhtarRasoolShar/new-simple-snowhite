@@ -40,11 +40,23 @@ data class GlobalSettings(
 }
 
 @JsonClass(generateAdapter = true)
+data class Banner(
+    @Json(name = "id") val id: Long = 0L,
+    @Json(name = "title") val title: String? = null,
+    @Json(name = "subtitle") val subtitle: String? = null,
+    @Json(name = "image_url") val imageUrl: String? = null,
+    @Json(name = "link") val link: String? = null,
+    @Json(name = "is_active") val isActive: Int? = 1,
+    @Json(name = "sort_order") val sort_order: Int? = 999
+)
+
+@JsonClass(generateAdapter = true)
 data class Category(
     @Json(name = "id") val id: Long,
     @Json(name = "name") val name: String,
     @Json(name = "is_active") val isActive: Int? = 1,
-    @Json(name = "image_url") val imageUrl: String? = null
+    @Json(name = "image_url") val imageUrl: String? = null,
+    @Json(name = "sort_order") val sort_order: Int? = 999
 )
 
 @JsonClass(generateAdapter = true)
@@ -59,7 +71,9 @@ data class Product(
     @Json(name = "image_url") val imageUrl: String? = null,
     @Json(name = "is_active") val isActive: Any? = 1,
     @Json(name = "discount_tier") val discountTier: String? = "auto",
-    @Json(name = "manual_discount") val manualDiscount: Any? = 0
+    @Json(name = "manual_discount") val manualDiscount: Any? = 0,
+    @Json(name = "sort_order") val sort_order: Int? = 999,
+    @Json(name = "real_id") val real_id: Int? = null
 ) {
     val numericPrice: Double
         get() = price?.toDoubleOrNull() ?: 0.0

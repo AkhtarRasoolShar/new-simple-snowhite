@@ -17,14 +17,23 @@ class SnowhiteViewModel : ViewModel() {
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
-    private val _settings = MutableStateFlow(GlobalSettings())
+    private val _settings = MutableStateFlow(repository.loadOfflineSettings() ?: GlobalSettings())
     val settings: StateFlow<GlobalSettings> = _settings.asStateFlow()
 
-    private val _categories = MutableStateFlow<List<Category>>(emptyList())
+    private val _categories = MutableStateFlow<List<Category>>(
+        repository.loadOfflineCategories().sortedBy { it.sort_order ?: 999 }
+    )
     val categories: StateFlow<List<Category>> = _categories.asStateFlow()
 
-    private val _products = MutableStateFlow<List<Product>>(emptyList())
+    private val _products = MutableStateFlow<List<Product>>(
+        repository.loadOfflineProducts().sortedWith(compareBy({ it.sort_order ?: 999 }, { it.id }))
+    )
     val products: StateFlow<List<Product>> = _products.asStateFlow()
+
+    private val _banners = MutableStateFlow<List<Banner>>(
+        repository.loadOfflineBanners().sortedBy { it.sort_order ?: 999 }
+    )
+    val banners: StateFlow<List<Banner>> = _banners.asStateFlow()
 
     private val _cartItems = MutableStateFlow<List<CartItem>>(emptyList())
     val cartItems: StateFlow<List<CartItem>> = _cartItems.asStateFlow()
@@ -71,7 +80,34 @@ class SnowhiteViewModel : ViewModel() {
     private var isInitialOrderLoad = true
 
     init {
+        hydrateFromOfflineCacheSynchronously()
         loadInitialData()
+    }
+
+    fun hydrateFromOfflineCacheSynchronously(context: android.content.Context? = com.example.config.AppConfig.appContext) {
+        repository.loadOfflineSettings(context)?.let { _settings.value = it }
+        val cachedCats = repository.loadOfflineCategories(context).sortedBy { it.sort_order ?: 999 }
+        if (cachedCats.isNotEmpty()) {
+            _categories.value = cachedCats
+        }
+        val cachedProds = repository.loadOfflineProducts(context).sortedWith(compareBy({ it.sort_order ?: 999 }, { it.id }))
+        if (cachedProds.isNotEmpty()) {
+            _products.value = cachedProds
+        }
+        val cachedBanners = repository.loadOfflineBanners(context).sortedBy { it.sort_order ?: 999 }
+        if (cachedBanners.isNotEmpty()) {
+            _banners.value = cachedBanners
+        }
+        prefetchAllAssetUrls(context)
+    }
+
+    private fun prefetchAllAssetUrls(context: android.content.Context? = com.example.config.AppConfig.appContext) {
+        val urls = mutableListOf<String?>()
+        urls.add(_settings.value.logoUrl)
+        _categories.value.forEach { urls.add(it.imageUrl) }
+        _products.value.forEach { urls.add(it.imageUrl) }
+        _banners.value.forEach { urls.add(it.imageUrl) }
+        com.example.ui.components.SnowhiteImageCache.prefetchImages(context, urls)
     }
 
     fun switchEnvironment(context: android.content.Context, environment: com.example.config.AppEnvironment) {
@@ -84,10 +120,56 @@ class SnowhiteViewModel : ViewModel() {
 
     fun loadInitialData() {
         viewModelScope.launch {
-            _isLoading.value = true
-            repository.getSettings().onSuccess { _settings.value = it }
-            repository.getCategories().onSuccess { _categories.value = it }
-            repository.getProducts().onSuccess { _products.value = it }
+            // Silent background sync: do not block UI if offline cache is already populated
+            val hasData = _products.value.isNotEmpty() && _categories.value.isNotEmpty()
+            if (!hasData) {
+                _isLoading.value = true
+            }
+            launch {
+                repository.getSettings().onSuccess { freshSettings ->
+                    _settings.value = freshSettings
+                    com.example.ui.components.SnowhiteImageCache.prefetchImages(
+                        com.example.config.AppConfig.appContext,
+                        listOf(freshSettings.logoUrl)
+                    )
+                }
+            }
+            launch {
+                repository.getBanners().onSuccess { freshBanners ->
+                    val sortedBanners = freshBanners.sortedBy { it.sort_order ?: 999 }
+                    _banners.value = sortedBanners
+                    com.example.ui.components.SnowhiteImageCache.prefetchImages(
+                        com.example.config.AppConfig.appContext,
+                        sortedBanners.map { it.imageUrl }
+                    )
+                }
+            }
+            val catsJob = launch {
+                repository.getCategories().onSuccess { freshCategories ->
+                    if (freshCategories.isNotEmpty()) {
+                        val sortedCats = freshCategories.sortedBy { it.sort_order ?: 999 }
+                        _categories.value = sortedCats
+                        com.example.ui.components.SnowhiteImageCache.prefetchImages(
+                            com.example.config.AppConfig.appContext,
+                            sortedCats.map { it.imageUrl }
+                        )
+                    }
+                }
+            }
+            val prodsJob = launch {
+                repository.getProducts().onSuccess { freshProducts ->
+                    if (freshProducts.isNotEmpty()) {
+                        val sortedProds = freshProducts.sortedWith(compareBy({ it.sort_order ?: 999 }, { it.id }))
+                        _products.value = sortedProds
+                        com.example.ui.components.SnowhiteImageCache.prefetchImages(
+                            com.example.config.AppConfig.appContext,
+                            sortedProds.map { it.imageUrl }
+                        )
+                    }
+                }
+            }
+            catsJob.join()
+            prodsJob.join()
             _isLoading.value = false
         }
     }

@@ -32,6 +32,10 @@ object AppConfig {
     private const val PREFS_NAME = "snowhite_app_config_prefs"
     private const val KEY_ENVIRONMENT = "selected_environment"
 
+    @Volatile
+    var appContext: Context? = null
+        private set
+
     var currentEnvironment: AppEnvironment = AppEnvironment.PRODUCTION
         private set
 
@@ -45,14 +49,18 @@ object AppConfig {
         get() = currentEnvironment.baseUrl
 
     fun init(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val appCtx = context.applicationContext
+        appContext = appCtx
+        val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val savedId = prefs.getString(KEY_ENVIRONMENT, AppEnvironment.PRODUCTION.id)
         currentEnvironment = AppEnvironment.fromId(savedId)
     }
 
     fun setEnvironment(context: Context, environment: AppEnvironment) {
+        val appCtx = context.applicationContext
+        appContext = appCtx
         currentEnvironment = environment
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_ENVIRONMENT, environment.id).apply()
     }
 
