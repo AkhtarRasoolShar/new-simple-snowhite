@@ -169,6 +169,21 @@ object SnowhitePhoneValidator {
 }
 
 object SnowhiteEmailValidator {
+    private val commonDomainTypos = mapOf(
+        "gmai.com" to "gmail.com",
+        "gmial.com" to "gmail.com",
+        "gmal.com" to "gmail.com",
+        "gamil.com" to "gmail.com",
+        "gmail.co" to "gmail.com",
+        "gmail.con" to "gmail.com",
+        "yaho.com" to "yahoo.com",
+        "yahooo.com" to "yahoo.com",
+        "yahoo.co" to "yahoo.com",
+        "hotmal.com" to "hotmail.com",
+        "hotmial.com" to "hotmail.com",
+        "outlok.com" to "outlook.com"
+    )
+
     fun validateEmail(email: String, required: Boolean = true): String? {
         val trimmed = email.trim()
         if (trimmed.isEmpty()) {
@@ -178,12 +193,16 @@ object SnowhiteEmailValidator {
             return "Invalid email: must include '@' (e.g. name@gmail.com)"
         }
         val localPart = trimmed.substringBefore("@")
-        val domainPart = trimmed.substringAfter("@", "")
+        val domainPart = trimmed.substringAfter("@", "").lowercase()
         if (localPart.isBlank()) {
             return "Invalid email: missing username before '@'"
         }
         if (!domainPart.contains(".") || domainPart.startsWith(".") || domainPart.endsWith(".")) {
             return "Invalid email: enter a valid domain after '@' (e.g. @gmail.com)"
+        }
+        val suggestedDomain = commonDomainTypos[domainPart]
+        if (suggestedDomain != null) {
+            return "Typo detected in '@$domainPart' — did you mean '@$suggestedDomain'?"
         }
         val tld = domainPart.substringAfterLast(".")
         if (tld.length < 2) {

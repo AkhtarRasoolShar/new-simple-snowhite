@@ -1,19 +1,26 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +55,21 @@ fun AuthScreen(
     var isRegisterMode by remember { mutableStateOf(initialRegisterMode) }
     var isForgotMode by remember { mutableStateOf(false) }
     var forgotStep by remember { mutableIntStateOf(1) }
+    var forgotChannel by remember { mutableStateOf("email") }
+    var forgotResendCountdown by remember { mutableIntStateOf(0) }
+    var forgotResendTrigger by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(forgotStep, forgotResendTrigger) {
+        if (forgotStep == 2) {
+            forgotResendCountdown = 60
+            while (forgotResendCountdown > 0) {
+                kotlinx.coroutines.delay(1000L)
+                forgotResendCountdown--
+            }
+        } else {
+            forgotResendCountdown = 0
+        }
+    }
 
     var name by remember { mutableStateOf("") }
     var selectedCountry by remember { mutableStateOf(CountryPhoneOption.PAKISTAN) }
@@ -116,6 +138,11 @@ fun AuthScreen(
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A)
                     )
+                    Text(
+                        text = if (forgotStep == 1) "Step 1 of 2: Choose OTP Delivery Channel" else "Step 2 of 2: Enter 6-Digit OTP & New Password",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
 
                     Spacer(modifier = Modifier.height(16.dp))
 
@@ -124,85 +151,199 @@ fun AuthScreen(
                             value = email,
                             onValueChange = { email = it },
                             label = { Text("Registered Email or WhatsApp Phone") },
+                            placeholder = { Text("e.g. name@gmail.com or 03001234567") },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
                         )
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        Text(
+                            text = "Select ONE channel to receive your 6-digit OTP:",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF334155)
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        val isEmailChannel = forgotChannel == "email"
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable(enabled = !isLoading) { forgotChannel = "email" },
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isEmailChannel) Color(0xFFEFF6FF) else Color(0xFFF8FAFC),
+                            border = BorderStroke(
+                                width = if (isEmailChannel) 2.dp else 1.dp,
+                                color = if (isEmailChannel) Color(0xFF0061E0) else Color(0xFFE2E8F0)
+                            )
                         ) {
-                            Button(
-                                onClick = {
-                                    if (email.isBlank()) {
-                                        Toast.makeText(context, "Enter registered Email or Phone", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    isLoading = true
-                                    scope.launch {
-                                        repository.forgotPasswordRequest(email, "email").fold(
-                                            onSuccess = { msg ->
-                                                isLoading = false
-                                                forgotStep = 2
-                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                            },
-                                            onFailure = { err ->
-                                                isLoading = false
-                                                Toast.makeText(context, err.message ?: "Failed to send OTP", Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    }
-                                },
+                            Row(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .height(50.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061E0)),
-                                shape = RoundedCornerShape(12.dp),
-                                enabled = !isLoading
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Send via Email", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                RadioButton(
+                                    selected = isEmailChannel,
+                                    onClick = { forgotChannel = "email" },
+                                    enabled = !isLoading,
+                                    colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0061E0))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Send OTP via Email",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Text(
+                                        text = if (email.isNotBlank()) email.trim() else "Send to your registered email address",
+                                        fontSize = 12.sp,
+                                        color = if (isEmailChannel) Color(0xFF0061E0) else Color(0xFF64748B)
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.Email,
+                                    contentDescription = null,
+                                    tint = if (isEmailChannel) Color(0xFF0061E0) else Color(0xFF94A3B8),
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
+                        }
 
-                            Button(
-                                onClick = {
-                                    if (email.isBlank()) {
-                                        Toast.makeText(context, "Enter registered Email or Phone", Toast.LENGTH_SHORT).show()
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        val isWhatsappChannel = forgotChannel == "whatsapp"
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable(enabled = !isLoading) { forgotChannel = "whatsapp" },
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isWhatsappChannel) Color(0xFFECFDF5) else Color(0xFFF8FAFC),
+                            border = BorderStroke(
+                                width = if (isWhatsappChannel) 2.dp else 1.dp,
+                                color = if (isWhatsappChannel) Color(0xFF10B981) else Color(0xFFE2E8F0)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = isWhatsappChannel,
+                                    onClick = { forgotChannel = "whatsapp" },
+                                    enabled = !isLoading,
+                                    colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF10B981))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Send OTP via WhatsApp",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Text(
+                                        text = if (email.isNotBlank()) email.trim() else "Send to your registered WhatsApp number",
+                                        fontSize = 12.sp,
+                                        color = if (isWhatsappChannel) Color(0xFF059669) else Color(0xFF64748B)
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.PhoneAndroid,
+                                    contentDescription = null,
+                                    tint = if (isWhatsappChannel) Color(0xFF10B981) else Color(0xFF94A3B8),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        Button(
+                            onClick = {
+                                val targetInput = email.trim()
+                                if (targetInput.isBlank()) {
+                                    Toast.makeText(context, "Enter your registered Email or WhatsApp Phone", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                if (forgotChannel == "email" && targetInput.contains("@")) {
+                                    val emailErr = SnowhiteEmailValidator.validateEmail(targetInput, required = true)
+                                    if (emailErr != null) {
+                                        Toast.makeText(context, emailErr, Toast.LENGTH_LONG).show()
                                         return@Button
                                     }
-                                    isLoading = true
-                                    scope.launch {
-                                        repository.forgotPasswordRequest(email, "whatsapp").fold(
-                                            onSuccess = { msg ->
-                                                isLoading = false
-                                                forgotStep = 2
-                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                            },
-                                            onFailure = { err ->
-                                                isLoading = false
-                                                Toast.makeText(context, err.message ?: "Failed to send OTP", Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(50.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
-                                shape = RoundedCornerShape(12.dp),
-                                enabled = !isLoading
-                            ) {
-                                Text("Send via WhatsApp", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+                                }
+                                isLoading = true
+                                scope.launch {
+                                    repository.forgotPasswordRequest(targetInput, forgotChannel).fold(
+                                        onSuccess = { msg ->
+                                            isLoading = false
+                                            forgotStep = 2
+                                            forgotResendTrigger++
+                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        },
+                                        onFailure = { err ->
+                                            isLoading = false
+                                            Toast.makeText(context, err.message ?: "Failed to send OTP", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061E0)),
+                            shape = RoundedCornerShape(12.dp),
+                            enabled = !isLoading
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                            } else {
+                                Text("Send 6-Digit OTP", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
                             }
                         }
                     } else {
+                        val channelName = if (forgotChannel == "email") "Email" else "WhatsApp"
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFF8FAFC),
+                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "6-Digit OTP sent via $channelName to:",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                                Text(
+                                    text = email.trim(),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
                         OutlinedTextField(
                             value = otp,
-                            onValueChange = { otp = it },
+                            onValueChange = { input -> otp = input.filter { it.isDigit() }.take(6) },
                             label = { Text("Enter 6-Digit OTP") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -213,25 +354,80 @@ fun AuthScreen(
                             label = { Text("Enter New Password") },
                             visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
                         )
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (forgotResendCountdown > 0) {
+                                Text(
+                                    text = "Resend OTP in ${forgotResendCountdown}s",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            } else {
+                                Text(
+                                    text = "Resend OTP",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF0061E0),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable(enabled = !isLoading) {
+                                        isLoading = true
+                                        scope.launch {
+                                            repository.forgotPasswordRequest(email.trim(), forgotChannel).fold(
+                                                onSuccess = { msg ->
+                                                    isLoading = false
+                                                    forgotResendTrigger++
+                                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                },
+                                                onFailure = { err ->
+                                                    isLoading = false
+                                                    Toast.makeText(context, err.message ?: "Failed to resend OTP", Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        }
+                                    }
+                                )
+                            }
+
+                            val otherChannelLabel = if (forgotChannel == "email") "WhatsApp" else "Email"
+                            Text(
+                                text = "Try via $otherChannelLabel instead",
+                                fontSize = 12.sp,
+                                color = Color(0xFF0061E0),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clickable(enabled = !isLoading) {
+                                    forgotChannel = if (forgotChannel == "email") "whatsapp" else "email"
+                                    forgotStep = 1
+                                    otp = ""
+                                }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
 
                         Button(
                             onClick = {
                                 if (otp.isBlank() || newPassword.isBlank()) {
-                                    Toast.makeText(context, "Fill in all fields", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Fill in 6-digit OTP and new password", Toast.LENGTH_SHORT).show()
                                     return@Button
                                 }
                                 isLoading = true
                                 scope.launch {
-                                    repository.resetPasswordWithOtp(email, otp, newPassword).fold(
+                                    repository.resetPasswordWithOtp(email.trim(), otp.trim(), newPassword).fold(
                                         onSuccess = { msg ->
                                             isLoading = false
                                             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                             isForgotMode = false
                                             forgotStep = 1
+                                            otp = ""
+                                            newPassword = ""
                                         },
                                         onFailure = { err ->
                                             isLoading = false
@@ -247,8 +443,8 @@ fun AuthScreen(
                             shape = RoundedCornerShape(12.dp),
                             enabled = !isLoading
                         ) {
-                            if (isLoading) CircularProgressIndicator(color = Color.White)
-                            else Text("RESET PASSWORD", fontWeight = FontWeight.Bold)
+                            if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                            else Text("VERIFY & RESET PASSWORD", fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
 
