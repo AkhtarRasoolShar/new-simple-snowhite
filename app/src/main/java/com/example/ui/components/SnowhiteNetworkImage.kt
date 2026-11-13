@@ -221,14 +221,22 @@ fun SnowhiteNetworkImage(
     url: String?,
     productName: String,
     modifier: Modifier = Modifier,
-    contentScale: ContentScale = ContentScale.Crop
+    contentScale: ContentScale = ContentScale.Crop,
+    defaultDrawableRes: Int? = null,
+    useUnsplashFallback: Boolean = true
 ) {
     val context = LocalContext.current
-    val resolvedUrl = remember(url, productName) { resolveImageUrl(url, productName) }
+    val resolvedUrl = remember(url, productName, useUnsplashFallback) {
+        if (url.isNullOrBlank() || url == "null") {
+            if (useUnsplashFallback) getUnsplashFallbackUrl(productName) else ""
+        } else {
+            AppConfig.resolveImageUrl(url)
+        }
+    }
 
     // 1. Check In-Memory LruCache synchronously on the very first frame (zero flicker, no spinner)
     val initialMemBitmap = remember(resolvedUrl) {
-        SnowhiteImageCache.getMemoryBitmap(resolvedUrl)
+        if (resolvedUrl.isNotBlank()) SnowhiteImageCache.getMemoryBitmap(resolvedUrl) else null
     }
 
     var bitmapState by remember(resolvedUrl) { mutableStateOf(initialMemBitmap) }
@@ -239,13 +247,13 @@ fun SnowhiteNetworkImage(
             val loaded = withContext(Dispatchers.IO) {
                 SnowhiteImageCache.loadFromDisk(context, resolvedUrl)
                     ?: SnowhiteImageCache.downloadAndCache(context, resolvedUrl)
-                    ?: run {
+                    ?: if (useUnsplashFallback) {
                         val fallbackUrl = getUnsplashFallbackUrl(productName)
                         if (fallbackUrl != resolvedUrl) {
                             SnowhiteImageCache.loadFromDisk(context, fallbackUrl)
                                 ?: SnowhiteImageCache.downloadAndCache(context, fallbackUrl)
                         } else null
-                    }
+                    } else null
             }
             if (loaded != null) {
                 bitmapState = loaded
@@ -263,17 +271,18 @@ fun SnowhiteNetworkImage(
         )
     } else {
         // Instant local drawable placeholder without any loading spinner flicker
-        val isFolded = productName.contains("Folded", ignoreCase = true) ||
-                productName.contains("Wash", ignoreCase = true) ||
-                productName.contains("Powder", ignoreCase = true)
+        val fallbackResId = defaultDrawableRes ?: run {
+            val isFolded = productName.contains("Folded", ignoreCase = true) ||
+                    productName.contains("Wash", ignoreCase = true) ||
+                    productName.contains("Powder", ignoreCase = true)
+            if (isFolded) R.drawable.img_folded_clothes_bg else R.drawable.img_dryclean_bg
+        }
         Box(
             modifier = modifier.background(Color(0xFFF1F5F9)),
             contentAlignment = Alignment.Center
         ) {
             Image(
-                painter = painterResource(
-                    id = if (isFolded) R.drawable.img_folded_clothes_bg else R.drawable.img_dryclean_bg
-                ),
+                painter = painterResource(id = fallbackResId),
                 contentDescription = productName,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = contentScale
